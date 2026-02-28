@@ -469,8 +469,8 @@ def apex_generate_docs(app_id: int | None = None) -> str:
         # --- Shared LOVs ---
         lovs = db.execute("""
             SELECT list_of_values_name,
-                   list_of_values_type,
-                   named_lov
+                   lov_type,
+                   source_type
               FROM apex_application_lovs
              WHERE application_id = :app_id
              ORDER BY list_of_values_name
@@ -479,7 +479,7 @@ def apex_generate_docs(app_id: int | None = None) -> str:
         # --- Auth Schemes ---
         auth_schemes = db.execute("""
             SELECT authorization_scheme_name,
-                   authorization_scheme_type
+                   scheme_type
               FROM apex_application_authorization
              WHERE application_id = :app_id
              ORDER BY authorization_scheme_name
@@ -551,7 +551,7 @@ def apex_generate_docs(app_id: int | None = None) -> str:
             lines.append("|----------|------|")
             for lov in lovs:
                 lname = (lov.get("LIST_OF_VALUES_NAME") or "").replace("|", "\\|")
-                ltype = (lov.get("LIST_OF_VALUES_TYPE") or "").replace("|", "\\|")
+                ltype = (lov.get("LOV_TYPE") or lov.get("SOURCE_TYPE") or "").replace("|", "\\|")
                 lines.append(f"| {lname} | {ltype} |")
         else:
             lines.append("_No shared LOVs defined._")
@@ -565,7 +565,7 @@ def apex_generate_docs(app_id: int | None = None) -> str:
             lines.append("|--------|------|")
             for scheme in auth_schemes:
                 sname = (scheme.get("AUTHORIZATION_SCHEME_NAME") or "").replace("|", "\\|")
-                stype = (scheme.get("AUTHORIZATION_SCHEME_TYPE") or "").replace("|", "\\|")
+                stype = (scheme.get("SCHEME_TYPE") or "").replace("|", "\\|")
                 lines.append(f"| {sname} | {stype} |")
         else:
             lines.append("_No authorization schemes defined._")
