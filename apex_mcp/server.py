@@ -20,6 +20,8 @@ from .tools.app_tools import (
     apex_finalize_app,
     apex_delete_app,
     apex_export_app,
+    apex_describe_page,
+    apex_dry_run_preview,
 )
 from .tools.page_tools import apex_add_page, apex_list_pages
 from .tools.component_tools import (
@@ -73,8 +75,23 @@ from .tools.setup_tools import (
 from .tools.validation_tools import apex_add_item_validation, apex_add_item_computation
 from .tools.visual_tools import (
     apex_add_jet_chart,
+    apex_add_gauge,
+    apex_add_funnel,
+    apex_add_sparkline,
     apex_add_metric_cards,
     apex_generate_analytics_page,
+)
+from .tools.advanced_tools import (
+    apex_generate_report_page,
+    apex_generate_wizard,
+    apex_add_notification_region,
+    apex_add_page_css,
+    apex_add_interactive_grid,
+    apex_bulk_add_items,
+    apex_validate_app,
+    apex_preview_page,
+    apex_add_search_bar,
+    apex_generate_from_schema,
 )
 
 # ── Server definition ─────────────────────────────────────────────────────────
@@ -129,20 +146,68 @@ apex_add_dynamic_action(10, "On Search Click", "click", "P10_SEARCH_BTN",
 apex_generate_analytics_page(
     page_id=5, page_name="Analytics",
     metrics=[
-        {"label": "Total", "sql": "SELECT COUNT(*) FROM MY_TABLE", "icon": "fa-database", "color": "blue"},
+        {"label": "Total", "sql": "SELECT COUNT(*) FROM MY_TABLE", "icon": "fa-database", "color": "#1E88E5"},
     ],
     charts=[
         {"region_name": "By Status", "chart_type": "pie",
-         "sql_query": "SELECT STATUS LABEL, COUNT(*) VALUE FROM MY_TABLE GROUP BY STATUS"},
+         "sql_query": "SELECT STATUS LABEL, COUNT(*) VALUE FROM MY_TABLE GROUP BY STATUS",
+         "color_palette": ["#1E88E5","#43A047","#FF9800"]},
         {"region_name": "Monthly Trend", "chart_type": "line",
          "sql_query": "SELECT TO_CHAR(CREATED,'MM/YYYY') LABEL, COUNT(*) VALUE FROM MY_TABLE GROUP BY TO_CHAR(CREATED,'MM/YYYY') ORDER BY 1"},
     ]
 )
 
-# Or add individual components:
-apex_add_metric_cards(page_id=5, region_name="KPIs", style="gradient", metrics=[...])
+# Individual chart types:
 apex_add_jet_chart(page_id=5, region_name="Trend", chart_type="bar",
-    sql_query="SELECT col1 LABEL, col2 VALUE FROM my_table ORDER BY 1")
+    sql_query="SELECT col1 LABEL, col2 VALUE FROM my_table ORDER BY 1",
+    color_palette=["#1E88E5","#43A047","#FF9800"])
+apex_add_gauge(page_id=5, region_name="Score", sql_query="SELECT 72 VALUE FROM DUAL",
+    value_column="VALUE", min_value=0, max_value=100, thresholds=[33,66])
+apex_add_funnel(page_id=5, region_name="Pipeline",
+    sql_query="SELECT STAGE LABEL, CNT VALUE FROM PIPELINE ORDER BY SEQ",
+    label_column="LABEL", value_column="VALUE")
+apex_add_sparkline(page_id=5, region_name="KPIs",
+    metrics=[{"label": "Active", "sql": "SELECT 42 FROM DUAL", "trend_sql": "SELECT VAL FROM T ORDER BY DT",
+               "color": "#43A047"}])
+apex_add_metric_cards(page_id=5, region_name="KPIs", style="gradient", metrics=[...])
+```
+
+## Advanced Page Generators
+```
+# IR page with optional filter items:
+apex_generate_report_page(page_id=10, page_name="Orders",
+    sql_query="SELECT * FROM ORDERS", filter_items=["STATUS","CUSTOMER_ID"])
+
+# Multi-step wizard:
+apex_generate_wizard(start_page_id=50, steps=[
+    {"title": "Basic Info", "items": [{"name": "NOME", "type": "TEXT"}, ...]},
+    {"title": "Details",    "items": [{"name": "DESC",  "type": "TEXTAREA"}]},
+], wizard_title="New Record", finish_redirect_page=10)
+
+# Interactive Grid (editable spreadsheet):
+apex_add_interactive_grid(page_id=20, region_name="Orders",
+    table_name="ORDERS", editable=True, add_row=True)
+
+# Bulk item creation:
+apex_bulk_add_items(page_id=10, region_name="Filters",
+    items=[{"name":"STATUS","type":"SELECT","lov":"SELECT s,v FROM ..."},
+           {"name":"DATE_FROM","type":"DATE_PICKER"}])
+
+# Notification / alert region:
+apex_add_notification_region(page_id=5, region_name="Notice",
+    message="Beta feature", notification_type="warning", dismissible=True)
+
+# Schema-to-app generator:
+apex_generate_from_schema(tables=["ORDERS","CUSTOMERS","PRODUCTS"],
+    start_page_id=10, include_dashboard=True)
+
+# App health check:
+apex_validate_app()   -- returns score 0-100 + issues list
+
+# Dry-run preview (test without executing):
+apex_dry_run_preview(enabled=True)
+# ... build calls ...
+apex_dry_run_preview(enabled=False)  -- returns PL/SQL log
 ```
 
 ## Key Conventions (APEX Best Practices)
@@ -176,6 +241,8 @@ mcp.tool()(apex_create_app)
 mcp.tool()(apex_finalize_app)
 mcp.tool()(apex_delete_app)
 mcp.tool()(apex_export_app)
+mcp.tool()(apex_describe_page)
+mcp.tool()(apex_dry_run_preview)
 
 # Pages
 mcp.tool()(apex_add_page)
@@ -233,10 +300,25 @@ mcp.tool()(apex_diff_app)
 mcp.tool()(apex_add_item_validation)
 mcp.tool()(apex_add_item_computation)
 
-# Visual tools (JET charts + inline HTML/JS metric cards)
+# Visual tools (JET charts + metric cards + gauges + sparklines)
 mcp.tool()(apex_add_jet_chart)
+mcp.tool()(apex_add_gauge)
+mcp.tool()(apex_add_funnel)
+mcp.tool()(apex_add_sparkline)
 mcp.tool()(apex_add_metric_cards)
 mcp.tool()(apex_generate_analytics_page)
+
+# Advanced generators & utilities
+mcp.tool()(apex_generate_report_page)
+mcp.tool()(apex_generate_wizard)
+mcp.tool()(apex_add_notification_region)
+mcp.tool()(apex_add_page_css)
+mcp.tool()(apex_add_interactive_grid)
+mcp.tool()(apex_bulk_add_items)
+mcp.tool()(apex_validate_app)
+mcp.tool()(apex_preview_page)
+mcp.tool()(apex_add_search_bar)
+mcp.tool()(apex_generate_from_schema)
 
 
 def main():

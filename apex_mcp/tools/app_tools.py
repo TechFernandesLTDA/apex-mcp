@@ -66,6 +66,7 @@ def apex_create_app(
     language: str = "en",
     date_format: str = "DD/MM/YYYY",
     auth_type: str = "NATIVE_APEX_ACCOUNTS",
+    theme_style: str = "REDWOOD_LIGHT",
 ) -> str:
     """Create a new APEX application (full scaffold: flow + theme 42 + auth + UI + nav).
 
@@ -100,6 +101,12 @@ def apex_create_app(
             - NATIVE_CUSTOM_AUTH: custom PL/SQL function
             - NATIVE_DAD: Database Access Descriptor
             - NATIVE_LDAP: LDAP directory
+        theme_style: Universal Theme 42 visual style. Options:
+            - "REDWOOD_LIGHT": Modern Oracle Redwood design (default)
+            - "VITA": Classic Vita style (light, clean)
+            - "VITA_SLATE": Vita with dark navigation
+            - "VITA_DARK": Full dark theme
+            - "SUMMIT": Summit style
 
     Returns:
         JSON with status, app_id, and list of operations performed.
@@ -202,6 +209,16 @@ wwv_imp_workspace.create_flow(
 );"""))
         log.append("create_flow: OK")
 
+        # Theme style mapping (Universal Theme 42 style IDs)
+        theme_style_map = {
+            "REDWOOD_LIGHT": THEME_STYLE_ID,  # default
+            "VITA":          "3354259454235268394",
+            "VITA_SLATE":    "2578598055068865363",
+            "VITA_DARK":     "2578621213771425854",
+            "SUMMIT":        "7030604500012966363",
+        }
+        effective_theme_style = theme_style_map.get(theme_style.upper(), THEME_STYLE_ID)
+
         # 4. Theme 42
         db.plsql(_blk(f"""
 wwv_flow_imp_shared.create_theme(
@@ -214,7 +231,7 @@ wwv_flow_imp_shared.create_theme(
 ,p_nav_bar_type=>'LIST'
 ,p_reference_id=>4072363937200175119
 ,p_is_locked=>false
-,p_current_theme_style_id=>{THEME_STYLE_ID}
+,p_current_theme_style_id=>{effective_theme_style}
 ,p_default_page_template=>{PAGE_TMPL_STANDARD}
 ,p_default_dialog_template=>2100407606326202693
 ,p_error_template=>{PAGE_TMPL_LOGIN}
@@ -538,4 +555,153 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
             "status": "error",
             "app_id": app_id,
             "error": str(e),
+        }, ensure_ascii=False, indent=2)
+
+
+def apex_describe_page(app_id: int, page_id: int) -> str:
+    """Get a structured summary of all components on an APEX page.
+
+    Designed for LLMs to understand existing page structure before modifying it.
+    Returns page metadata plus a hierarchical view of all regions, items,
+    buttons, processes, and dynamic actions.
+
+    Args:
+        app_id: Application ID.
+        page_id: Page ID to describe.
+
+    Returns:
+        JSON with:
+            - page: Page metadata (name, template, auth)
+            - regions: List of regions with type and source info
+            - items: List of items with type and LOV
+            - buttons: List of buttons
+            - processes: List of processes
+            - dynamic_actions: List of DAs
+            - summary: Counts of each component type
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    try:
+        # Page metadata
+        page_rows = db.execute("""
+            SELECT page_id, page_name, page_template, page_group,
+                   authorization_scheme, page_mode
+              FROM apex_application_pages
+             WHERE application_id = :app_id AND page_id = :page_id
+        """, {"app_id": app_id, "page_id": page_id})
+
+        if not page_rows:
+            return json.dumps({"status": "error", "error": f"Page {page_id} not found in app {app_id}."})
+
+        page = page_rows[0]
+
+        # Regions
+        regions = db.execute("""
+            SELECT region_id, region_name, region_type, display_sequence,
+                   source_type, region_source
+              FROM apex_application_page_regions
+             WHERE application_id = :app_id AND page_id = :page_id
+             ORDER BY display_sequence
+        """, {"app_id": app_id, "page_id": page_id})
+
+        # Items
+        items = db.execute("""
+            SELECT item_name, item_type, display_sequence, region_id,
+                   label, lov_definition, item_default, is_required
+              FROM apex_application_page_items
+             WHERE application_id = :app_id AND page_id = :page_id
+             ORDER BY display_sequence
+        """, {"app_id": app_id, "page_id": page_id})
+
+        # Buttons
+        buttons = db.execute("""
+            SELECT button_name, label, button_action, display_sequence,
+                   button_position, button_condition_type
+              FROM apex_application_page_buttons
+             WHERE application_id = :app_id AND page_id = :page_id
+             ORDER BY display_sequence
+        """, {"app_id": app_id, "page_id": page_id})
+
+        # Processes
+        processes = db.execute("""
+            SELECT process_name, process_type, process_point, process_sequence,
+                   process_sql
+              FROM apex_application_page_proc
+             WHERE application_id = :app_id AND page_id = :page_id
+             ORDER BY process_sequence
+        """, {"app_id": app_id, "page_id": page_id})
+
+        # Dynamic actions
+        das = db.execute("""
+            SELECT dynamic_action_name, triggering_event, triggering_element,
+                   bind_type, execution_sequence
+              FROM apex_application_page_da_events
+             WHERE application_id = :app_id AND page_id = :page_id
+             ORDER BY execution_sequence
+        """, {"app_id": app_id, "page_id": page_id})
+
+        # Trim long source for readability
+        for r in regions:
+            src = r.get("REGION_SOURCE") or ""
+            r["REGION_SOURCE"] = (src[:200] + "...") if len(str(src)) > 200 else src
+
+        return json.dumps({
+            "status": "ok",
+            "app_id": app_id,
+            "page": {k.lower(): v for k, v in page.items()},
+            "regions": [{k.lower(): v for k, v in r.items()} for r in regions],
+            "items": [{k.lower(): v for k, v in i.items()} for i in items],
+            "buttons": [{k.lower(): v for k, v in b.items()} for b in buttons],
+            "processes": [{k.lower(): v for k, v in p.items()} for p in processes],
+            "dynamic_actions": [{k.lower(): v for k, v in d.items()} for d in das],
+            "summary": {
+                "regions": len(regions),
+                "items": len(items),
+                "buttons": len(buttons),
+                "processes": len(processes),
+                "dynamic_actions": len(das),
+            },
+        }, ensure_ascii=False, indent=2, default=str)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+def apex_dry_run_preview(enabled: bool = True) -> str:
+    """Enable or disable dry-run mode for all MCP tools.
+
+    When enabled, all subsequent apex_* tool calls that write to the database
+    (plsql calls) are intercepted and logged but NOT executed.
+    Use this to preview the PL/SQL that would be generated before committing.
+
+    Args:
+        enabled: True to enable dry-run (default), False to disable and return log.
+
+    Returns:
+        JSON with status, and when disabling: the collected PL/SQL log.
+
+    Example usage:
+        apex_dry_run_preview(True)      # start dry-run
+        apex_add_page(5, "Test", "blank")  # logged but not executed
+        apex_add_region(5, "My Region", "report", sql="SELECT * FROM emp")
+        result = apex_dry_run_preview(False)  # stop + get log
+        # result contains all PL/SQL that would have been executed
+    """
+    if enabled:
+        db.enable_dry_run()
+        return json.dumps({
+            "status": "ok",
+            "mode": "dry_run_enabled",
+            "message": "Dry-run mode ON. All subsequent plsql() calls will be logged but NOT executed. Call apex_dry_run_preview(False) to stop and retrieve the log.",
+        }, ensure_ascii=False, indent=2)
+    else:
+        log = db.get_dry_run_log()
+        db.disable_dry_run()
+        return json.dumps({
+            "status": "ok",
+            "mode": "dry_run_disabled",
+            "statements_count": len(log),
+            "plsql_log": log,
+            "message": f"Dry-run mode OFF. {len(log)} PL/SQL statement(s) were captured (not executed).",
         }, ensure_ascii=False, indent=2)

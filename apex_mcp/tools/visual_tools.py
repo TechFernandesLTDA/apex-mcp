@@ -49,6 +49,7 @@ def apex_add_jet_chart(
     orientation: str = "vertical",
     sequence: int = 20,
     extra_series: list[dict[str, Any]] | None = None,
+    color_palette: list[str] | None = None,
 ) -> str:
     """Add an Oracle JET chart region to a page.
 
@@ -83,6 +84,7 @@ def apex_add_jet_chart(
             List of dicts: [{"sql": "...", "value_column": "VALUE",
                               "label_column": "LABEL", "series_name": "Series 2"}]
             Each extra series can have its own SQL query.
+        color_palette: Optional list of hex colors for chart series (e.g., ["#00995D", "#1e88e5"]). Overrides default JET colors.
 
     Returns:
         JSON with status, region_id, chart_id.
@@ -146,6 +148,12 @@ wwv_flow_imp_page.create_page_plug(
         if is_pie_type:
             pie_params = ",p_pie_other_threshold=>0\n,p_pie_selection_effect=>'highlightAndExplode'"
 
+        # Color palette override
+        palette_line = ""
+        if color_palette:
+            colors_js = "[" + ",".join(f'\\"{c}\\"' for c in color_palette) + "]"
+            palette_line = f",p_init_javascript_code=>'{{\"colors\":{colors_js}}}'"
+
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart(
  p_id=>wwv_flow_imp.id({chart_id})
@@ -185,6 +193,7 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_gauge_orientation=>'circular'
 ,p_gauge_plot_area=>'on'
 ,p_show_gauge_value=>true
+{palette_line}
 );"""))
 
         # ── 3. Create primary series ─────────────────────────────────────────
@@ -311,7 +320,423 @@ wwv_flow_imp_page.create_jet_chart_axis(
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
 
 
-# ── Tool 2: Metric Cards with inline HTML/JS ──────────────────────────────────
+# ── Tool 2: Dial Gauge Chart ──────────────────────────────────────────────────
+
+def apex_add_gauge(
+    page_id: int,
+    region_name: str,
+    sql_query: str,
+    value_column: str = "VALUE",
+    min_value: float = 0,
+    max_value: float = 100,
+    thresholds: list[dict] | None = None,
+    height: int = 300,
+    sequence: int = 20,
+    color: str | None = None,
+) -> str:
+    """Add a JET dial gauge chart to a page.
+
+    Ideal for KPI scores, completion rates, SLA metrics, health indicators.
+    Renders as a circular dial with colored threshold zones.
+
+    Args:
+        page_id: Target page ID.
+        region_name: Region title.
+        sql_query: SQL returning a single numeric value in VALUE_COLUMN.
+            Example: "SELECT ROUND(AVG(NR_PCT_TOTAL)) AS VALUE FROM TEA_AVALIACOES"
+        value_column: Column name with the gauge value (default "VALUE").
+        min_value: Minimum scale value (default 0).
+        max_value: Maximum scale value (default 100).
+        thresholds: List of threshold zones. Each dict:
+            {"value": 33, "color": "#e53935"}  -- red up to 33
+            {"value": 66, "color": "#fb8c00"}  -- orange up to 66
+            {"value": 100, "color": "#43a047"} -- green up to 100
+            If omitted, uses a single green zone.
+        height: Gauge height in pixels (default 300).
+        sequence: Region display order.
+        color: Single color hex for the gauge needle/fill (optional).
+
+    Returns:
+        JSON with status, region_id, chart_id.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+    if not sql_query.strip():
+        return json.dumps({"status": "error", "error": "sql_query is required."})
+
+    default_thresholds = thresholds or [
+        {"value": max_value * 0.33, "color": "#e53935"},
+        {"value": max_value * 0.66, "color": "#fb8c00"},
+        {"value": max_value,        "color": "#43a047"},
+    ]
+
+    try:
+        region_id = ids.next(f"gauge_region_{page_id}_{_esc(region_name)}")
+        chart_id  = ids.next(f"gauge_chart_{page_id}_{_esc(region_name)}")
+        series_id = ids.next(f"gauge_series_{page_id}_{_esc(region_name)}")
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--scrollBody'
+,p_escape_on_http_output=>'Y'
+,p_plug_template=>{REGION_TMPL_STANDARD}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source_type=>'NATIVE_JET_CHART'
+,p_plug_query_num_rows=>15
+);"""))
+
+        color_line = f",p_init_javascript_code=>'{{\"color\":\"{color}\"}}'" if color else ""
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart(
+ p_id=>wwv_flow_imp.id({chart_id})
+,p_region_id=>wwv_flow_imp.id({region_id})
+,p_chart_type=>'dial'
+,p_height=>'{height}'
+,p_animation_on_display=>'auto'
+,p_animation_on_data_change=>'auto'
+,p_gauge_orientation=>'circular'
+,p_gauge_plot_area=>'on'
+,p_show_gauge_value=>true
+,p_legend_rendered=>'off'
+,p_overview_rendered=>'off'
+{color_line}
+);"""))
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart_series(
+ p_id=>wwv_flow_imp.id({series_id})
+,p_chart_id=>wwv_flow_imp.id({chart_id})
+,p_seq=>10
+,p_name=>'{_esc(region_name)}'
+,p_data_source_type=>'SQL'
+,p_data_source=>{_sql_to_varchar2(sql_query)}
+,p_items_value_column_name=>'{_esc(value_column.upper())}'
+,p_items_label_column_name=>'{_esc(value_column.upper())}'
+,p_assigned_to_y2=>'off'
+,p_items_label_rendered=>false
+,p_items_label_display_as=>'PERCENT'
+,p_threshold_display=>'onIndicator'
+);"""))
+
+        # Y axis with min/max/thresholds
+        y_axis_id = ids.next(f"gauge_y_{page_id}_{_esc(region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart_axis(
+ p_id=>wwv_flow_imp.id({y_axis_id})
+,p_chart_id=>wwv_flow_imp.id({chart_id})
+,p_axis=>'y'
+,p_is_rendered=>'on'
+,p_format_scaling=>'auto'
+,p_scaling=>'linear'
+,p_baseline_scaling=>'zero'
+,p_position=>'auto'
+,p_major_tick_rendered=>'on'
+,p_minor_tick_rendered=>'off'
+,p_tick_label_rendered=>'on'
+,p_zoom_order_seconds=>false
+,p_zoom_order_minutes=>false
+,p_zoom_order_hours=>false
+,p_zoom_order_days=>false
+,p_zoom_order_weeks=>false
+,p_zoom_order_months=>false
+,p_zoom_order_quarters=>false
+,p_zoom_order_years=>false
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, region_type="gauge"
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "region_id": region_id,
+            "chart_id": chart_id,
+            "chart_type": "dial",
+            "page_id": page_id,
+            "message": f"Gauge '{region_name}' added to page {page_id}.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ── Tool 3: Funnel Chart ──────────────────────────────────────────────────────
+
+def apex_add_funnel(
+    page_id: int,
+    region_name: str,
+    sql_query: str,
+    label_column: str = "LABEL",
+    value_column: str = "VALUE",
+    series_name: str = "",
+    height: int = 380,
+    sequence: int = 20,
+    color_palette: list[str] | None = None,
+) -> str:
+    """Add a JET funnel chart to a page.
+
+    Perfect for visualizing pipeline stages, approval flows, or conversion steps.
+    Each row in the SQL represents one stage of the funnel (ordered top to bottom).
+
+    Args:
+        page_id: Target page ID.
+        region_name: Region title.
+        sql_query: SQL ordered from largest to smallest stage.
+            Example: "SELECT DS_STATUS AS LABEL, COUNT(*) AS VALUE
+                        FROM TEA_AVALIACOES GROUP BY DS_STATUS ORDER BY 2 DESC"
+        label_column: Column for stage labels (default "LABEL").
+        value_column: Column for stage values (default "VALUE").
+        series_name: Legend label.
+        height: Chart height in pixels (default 380).
+        sequence: Region display order.
+        color_palette: Optional hex color list per stage.
+
+    Returns:
+        JSON with status, region_id, chart_id.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+
+    effective_name = series_name or region_name
+
+    try:
+        region_id = ids.next(f"funnel_region_{page_id}_{_esc(region_name)}")
+        chart_id  = ids.next(f"funnel_chart_{page_id}_{_esc(region_name)}")
+        series_id = ids.next(f"funnel_series_{page_id}_{_esc(region_name)}")
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--scrollBody'
+,p_escape_on_http_output=>'Y'
+,p_plug_template=>{REGION_TMPL_STANDARD}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source_type=>'NATIVE_JET_CHART'
+,p_plug_query_num_rows=>15
+);"""))
+
+        palette_line = ""
+        if color_palette:
+            colors_js = "[" + ",".join(f'\\"{c}\\"' for c in color_palette) + "]"
+            palette_line = f",p_init_javascript_code=>'{{\"colors\":{colors_js}}}'"
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart(
+ p_id=>wwv_flow_imp.id({chart_id})
+,p_region_id=>wwv_flow_imp.id({region_id})
+,p_chart_type=>'funnel'
+,p_height=>'{height}'
+,p_animation_on_display=>'auto'
+,p_animation_on_data_change=>'auto'
+,p_data_cursor=>'auto'
+,p_data_cursor_behavior=>'auto'
+,p_legend_rendered=>'on'
+,p_legend_position=>'end'
+,p_overview_rendered=>'off'
+,p_tooltip_rendered=>'Y'
+,p_show_series_name=>true
+,p_show_value=>true
+{palette_line}
+);"""))
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart_series(
+ p_id=>wwv_flow_imp.id({series_id})
+,p_chart_id=>wwv_flow_imp.id({chart_id})
+,p_seq=>10
+,p_name=>'{_esc(effective_name)}'
+,p_data_source_type=>'SQL'
+,p_data_source=>{_sql_to_varchar2(sql_query)}
+,p_items_value_column_name=>'{_esc(value_column.upper())}'
+,p_items_label_column_name=>'{_esc(label_column.upper())}'
+,p_assigned_to_y2=>'off'
+,p_items_label_rendered=>true
+,p_items_label_position=>'auto'
+,p_items_label_display_as=>'LABEL'
+,p_threshold_display=>'onIndicator'
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, region_type="funnel"
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "region_id": region_id,
+            "chart_id": chart_id,
+            "chart_type": "funnel",
+            "page_id": page_id,
+            "message": f"Funnel chart '{region_name}' added to page {page_id}.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ── Tool 4: Sparkline Metric Cards ────────────────────────────────────────────
+
+def apex_add_sparkline(
+    page_id: int,
+    region_name: str,
+    metrics: list[dict[str, Any]],
+    sequence: int = 10,
+    columns: int = 4,
+) -> str:
+    """Add metric cards with inline sparkline trend bars.
+
+    Each card shows: title, current value, and a mini 7-bar trend chart.
+    The developer controls colors via each metric's "color" key (hex or named).
+
+    Args:
+        page_id: Target page ID.
+        region_name: Region name.
+        metrics: List of metric dicts. Each dict:
+            - "label": Card title (required)
+            - "sql": SQL returning single current value (required)
+            - "trend_sql": SQL returning up to 7 rows with VALUE column for sparkline.
+                Example: "SELECT NR_PCT_TOTAL AS VALUE FROM TEA_AVALIACOES
+                           WHERE DS_STATUS='CONCLUIDA' ORDER BY DT_AVALIACAO DESC
+                           FETCH FIRST 7 ROWS ONLY"
+            - "icon": Font Awesome icon class (e.g., "fa-chart-line")
+            - "color": Hex color or named color for accent (e.g., "#00995D", "blue")
+            - "suffix": Unit suffix (e.g., "%", "pts")
+            - "prefix": Unit prefix (e.g., "$", "R$")
+        sequence: Region display order.
+        columns: Number of columns (2-4).
+
+    Returns:
+        JSON with status, region_id.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+
+    named_colors = {
+        "blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
+        "red": "#e53935", "purple": "#8e24aa", "teal": "#00897b",
+        "indigo": "#3949ab", "amber": "#ffb300",
+    }
+    col_pct = {2: "48%", 3: "31%", 4: "23%"}.get(columns, "23%")
+
+    try:
+        region_id = ids.next(f"sparkline_region_{page_id}_{_esc(region_name)}")
+
+        lines: list[str] = []
+        lines.append("DECLARE")
+        lines.append("  v_val  VARCHAR2(4000);")
+        lines.append("  v_bars VARCHAR2(4000);")
+        lines.append("  v_max  NUMBER;")
+        lines.append("  v_h    NUMBER;")
+        lines.append("BEGIN")
+        lines.append(f"""  sys.htp.p('<style>
+    .mcp-spark-grid{{display:flex;flex-wrap:wrap;gap:14px;padding:6px 0;}}
+    .mcp-spark-card{{flex:1 1 {col_pct};min-width:150px;background:#fff;border-radius:10px;
+      padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.08);border-left:4px solid #ccc;}}
+    .mcp-spark-top{{display:flex;align-items:center;gap:10px;margin-bottom:8px;}}
+    .mcp-spark-icon{{font-size:22px;}}
+    .mcp-spark-label{{font-size:.78rem;color:#777;text-transform:uppercase;letter-spacing:.4px;}}
+    .mcp-spark-value{{font-size:1.8rem;font-weight:700;color:#333;margin-bottom:8px;}}
+    .mcp-spark-bars{{display:flex;align-items:flex-end;gap:3px;height:36px;}}
+    .mcp-spark-bar{{flex:1;border-radius:2px 2px 0 0;min-height:3px;opacity:.85;
+      transition:opacity .2s;}}.mcp-spark-bar:hover{{opacity:1;}}
+  </style>');""")
+        lines.append("  sys.htp.p('<div class=\"mcp-spark-grid\">');")
+
+        for i, m in enumerate(metrics):
+            label     = m.get("label", f"Metric {i+1}")
+            sql       = m.get("sql", "SELECT 0 FROM DUAL")
+            trend_sql = m.get("trend_sql", "")
+            icon      = m.get("icon", "fa-chart-line")
+            raw_color = m.get("color", "blue")
+            suffix    = m.get("suffix", "")
+            prefix    = m.get("prefix", "")
+            color     = named_colors.get(raw_color, raw_color)
+
+            lines.append(f"""
+  -- Card {i}: {label}
+  BEGIN EXECUTE IMMEDIATE '{_esc(sql)}' INTO v_val;
+  EXCEPTION WHEN OTHERS THEN v_val := 'N/A'; END;
+  sys.htp.p('<div class="mcp-spark-card" style="border-left-color:{color}">');
+  sys.htp.p('<div class="mcp-spark-top">');
+  sys.htp.p('<span class="mcp-spark-icon fa {icon}" style="color:{color}"></span>');
+  sys.htp.p('<span class="mcp-spark-label">{_esc(label)}</span>');
+  sys.htp.p('</div>');
+  sys.htp.p('<div class="mcp-spark-value">{_esc(prefix)}' || APEX_ESCAPE.HTML(v_val) || '{_esc(suffix)}</div>');""")
+
+            if trend_sql:
+                lines.append(f"""
+  -- Sparkline bars for card {i}
+  v_bars := '';
+  v_max := 1;
+  BEGIN
+    EXECUTE IMMEDIATE 'SELECT NVL(MAX(VALUE),1) FROM ({_esc(trend_sql)})' INTO v_max;
+    IF v_max = 0 THEN v_max := 1; END IF;
+    FOR r IN (SELECT VALUE FROM ({_esc(trend_sql)})) LOOP
+      v_h := GREATEST(ROUND(r.VALUE / v_max * 34), 3);
+      v_bars := v_bars || '<div class="mcp-spark-bar" style="height:' || v_h || 'px;background:{color}"></div>';
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN v_bars := '';
+  END;
+  sys.htp.p('<div class="mcp-spark-bars">' || v_bars || '</div>');""")
+            else:
+                lines.append("  sys.htp.p('<div class=\"mcp-spark-bars\"></div>');")
+
+            lines.append("  sys.htp.p('</div>');")
+
+        lines.append("  sys.htp.p('</div>');")
+        lines.append("END;")
+        full_plsql = "\n".join(lines)
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--noPadding:t-Region--hideHeader:t-Region--scrollBody'
+,p_plug_template=>{REGION_TMPL_BLANK}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source=>'{_esc(full_plsql)}'
+,p_plug_source_type=>'NATIVE_PLSQL'
+,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, region_type="sparkline"
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "region_id": region_id,
+            "metric_count": len(metrics),
+            "page_id": page_id,
+            "message": f"Sparkline cards '{region_name}' added to page {page_id} ({len(metrics)} metrics).",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ── Tool 5: Metric Cards with inline HTML/JS ──────────────────────────────────
 
 def apex_add_metric_cards(
     page_id: int,
@@ -320,6 +745,7 @@ def apex_add_metric_cards(
     sequence: int = 10,
     columns: int = 4,
     style: str = "gradient",
+    color_palette: list[str] | None = None,
 ) -> str:
     """Add modern metric cards with inline HTML and JavaScript to a page.
 
@@ -466,7 +892,21 @@ def apex_add_metric_cards(
             subtitle = m.get("subtitle", "")
             link_pg  = m.get("link_page")
 
-            if style == "gradient":
+            # Developer color override (takes precedence over style palette)
+            if color_palette and i < len(color_palette):
+                hex_col = color_palette[i]
+                if style == "gradient":
+                    bg = f"linear-gradient(135deg,{hex_col},{hex_col}cc)"
+                    text_color = "#fff"
+                    card_style = f"background:{bg};color:{text_color};"
+                    icon_style = f"color:{text_color};"
+                elif style == "white":
+                    card_style = f"border-left-color:{hex_col};"
+                    icon_style = f"color:{hex_col};"
+                else:
+                    card_style = ""
+                    icon_style = f"color:{hex_col};"
+            elif style == "gradient":
                 bg, text_color = gradient_map.get(color, gradient_map["blue"])
                 card_style = f"background:{bg};color:{text_color};"
                 icon_style = f"color:{text_color};"

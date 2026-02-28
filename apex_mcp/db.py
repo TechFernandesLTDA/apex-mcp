@@ -15,6 +15,8 @@ class ConnectionManager:
     def __init__(self):
         self._conn: Optional[oracledb.Connection] = None
         self._conn_lock = threading.Lock()
+        self.dry_run: bool = False
+        self._dry_run_log: list[str] = []
 
     @classmethod
     def get(cls) -> "ConnectionManager":
@@ -98,7 +100,10 @@ class ConnectionManager:
         return log
 
     def plsql(self, body: str, params: dict | None = None) -> None:
-        """Execute a PL/SQL anonymous block and commit."""
+        """Execute a PL/SQL anonymous block and commit. In dry_run mode, only records the SQL."""
+        if self.dry_run:
+            self._dry_run_log.append(body)
+            return
         c = self.conn
         cur = c.cursor()
         try:
@@ -106,6 +111,19 @@ class ConnectionManager:
             c.commit()
         finally:
             cur.close()
+
+    def enable_dry_run(self) -> None:
+        """Enable dry-run mode: plsql() calls are logged but NOT executed."""
+        self.dry_run = True
+        self._dry_run_log = []
+
+    def disable_dry_run(self) -> None:
+        """Disable dry-run mode and return to normal execution."""
+        self.dry_run = False
+
+    def get_dry_run_log(self) -> list[str]:
+        """Return list of PL/SQL blocks collected during dry-run mode."""
+        return list(self._dry_run_log)
 
     def set_apex_context(self, app_id: int) -> None:
         """Set APEX workspace and application context for import operations."""
