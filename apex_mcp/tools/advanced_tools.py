@@ -848,45 +848,96 @@ def apex_validate_app(app_id: int | None = None) -> str:
         return json.dumps({"status": "error", "error": "No app_id provided and no active session."})
 
     try:
-        rows = db.execute("""
-            SELECT message_type,
-                   message,
-                   page_id,
-                   component_name,
-                   component_type
-              FROM apex_application_all_auth
-             WHERE application_id = :app_id
-               AND message_type IN ('ERROR','WARNING')
-             ORDER BY message_type, page_id
+        issues:   list[str] = []
+        warnings: list[str] = []
+
+        # ── 1. Pages without regions ─────────────────────────────────────────
+        empty_pages = db.execute("""
+            SELECT p.page_id, p.page_name
+              FROM apex_application_pages p
+             WHERE p.application_id = :app_id
+               AND p.page_id NOT IN (
+                     SELECT r.page_id
+                       FROM apex_application_page_regions r
+                      WHERE r.application_id = :app_id
+                   )
+               AND p.page_id != 0
+             ORDER BY p.page_id
         """, {"app_id": effective_app_id})
+        for row in empty_pages:
+            warnings.append(
+                f"Page {row['PAGE_ID']} '{row['PAGE_NAME']}' has no regions."
+            )
 
-        errors   = [r for r in rows if r.get("MESSAGE_TYPE") == "ERROR"]
-        warnings = [r for r in rows if r.get("MESSAGE_TYPE") == "WARNING"]
-
-        # Also check for pages/regions with invalid SQL using system view
-        invalid_items = db.execute("""
-            SELECT page_id, item_name, item_type
+        # ── 2. SELECT-list items without LOV ──────────────────────────────────
+        select_no_lov = db.execute("""
+            SELECT page_id, item_name, display_as
               FROM apex_application_page_items
              WHERE application_id = :app_id
-               AND item_type LIKE '%SELECT%'
-               AND list_of_values_type IS NULL
-               AND lov_definition IS NULL
-             ORDER BY page_id
+               AND UPPER(display_as) LIKE '%SELECT%'
+               AND (lov_named_lov IS NULL OR lov_named_lov = 'null')
+               AND (lov_definition IS NULL OR TRIM(lov_definition) IS NULL)
+             ORDER BY page_id, item_name
         """, {"app_id": effective_app_id})
+        for row in select_no_lov:
+            warnings.append(
+                f"Page {row['PAGE_ID']} item '{row['ITEM_NAME']}' "
+                f"({row['DISPLAY_AS']}) has no LOV defined."
+            )
 
-        score = 100 - len(errors) * 10 - len(warnings) * 2
-        score = max(0, min(100, score))
+        # ── 3. Regions with empty SQL source ─────────────────────────────────
+        empty_sql = db.execute("""
+            SELECT page_id, region_name, source_type
+              FROM apex_application_page_regions
+             WHERE application_id = :app_id
+               AND UPPER(source_type) IN ('REPORT', 'SQL_QUERY',
+                   'NATIVE_IR', 'NATIVE_IG', 'NATIVE_SQL_REPORT')
+               AND (region_source IS NULL
+                    OR DBMS_LOB.GETLENGTH(region_source) = 0)
+             ORDER BY page_id, region_name
+        """, {"app_id": effective_app_id})
+        for row in empty_sql:
+            issues.append(
+                f"Page {row['PAGE_ID']} region '{row['REGION_NAME']}' "
+                f"({row['SOURCE_TYPE']}) has no SQL source."
+            )
+
+        # ── 4. Summary counts ─────────────────────────────────────────────────
+        totals = db.execute("""
+            SELECT
+              (SELECT COUNT(*) FROM apex_application_pages
+                WHERE application_id = :app_id AND page_id != 0)  AS pages,
+              (SELECT COUNT(*) FROM apex_application_page_regions
+                WHERE application_id = :app_id)                    AS regions,
+              (SELECT COUNT(*) FROM apex_application_page_items
+                WHERE application_id = :app_id)                    AS items,
+              (SELECT COUNT(*) FROM apex_application_page_buttons
+                WHERE application_id = :app_id)                    AS buttons,
+              (SELECT COUNT(*) FROM apex_application_page_proc
+                WHERE application_id = :app_id)                    AS processes
+              FROM dual
+        """, {"app_id": effective_app_id})
+        summary = totals[0] if totals else {}
+
+        score = max(0, min(100, 100 - len(issues) * 10 - len(warnings) * 2))
 
         return json.dumps({
             "status": "ok",
             "app_id": effective_app_id,
-            "validation_score": score,
-            "error_count": len(errors),
-            "warning_count": len(warnings),
-            "errors": errors[:20],
-            "warnings": warnings[:20],
-            "select_items_without_lov": invalid_items[:10],
-            "message": f"Validation complete: {len(errors)} errors, {len(warnings)} warnings. Score: {score}/100.",
+            "score": score,
+            "issues": issues,
+            "warnings": warnings,
+            "summary": {
+                "pages":     summary.get("PAGES", 0),
+                "regions":   summary.get("REGIONS", 0),
+                "items":     summary.get("ITEMS", 0),
+                "buttons":   summary.get("BUTTONS", 0),
+                "processes": summary.get("PROCESSES", 0),
+            },
+            "message": (
+                f"Validation complete: {len(issues)} errors, "
+                f"{len(warnings)} warnings. Score: {score}/100."
+            ),
         }, ensure_ascii=False, indent=2)
 
     except Exception as e:
