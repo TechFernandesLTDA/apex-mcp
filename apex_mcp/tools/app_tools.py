@@ -485,9 +485,9 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
                 SELECT f.name, f.contents
                   FROM TABLE(apex_export.get_application(
                          p_application_id         => :app_id,
-                         p_split                  => 0,
-                         p_with_date              => 1,
-                         p_with_ir_public_reports => 0
+                         p_split                  => false,
+                         p_with_date              => true,
+                         p_with_ir_public_reports => false
                        )) f
             """, {"app_id": app_id})
             row = cur.fetchone()

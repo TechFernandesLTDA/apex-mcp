@@ -19,6 +19,7 @@ from .tools.app_tools import (
     apex_create_app,
     apex_finalize_app,
     apex_delete_app,
+    apex_export_app,
 )
 from .tools.page_tools import apex_add_page, apex_list_pages
 from .tools.component_tools import (
@@ -147,6 +148,7 @@ mcp.tool()(apex_list_apps)
 mcp.tool()(apex_create_app)
 mcp.tool()(apex_finalize_app)
 mcp.tool()(apex_delete_app)
+mcp.tool()(apex_export_app)
 
 # Pages
 mcp.tool()(apex_add_page)

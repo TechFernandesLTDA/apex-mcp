@@ -9,7 +9,11 @@ WALLET_DIR  = os.getenv("ORACLE_WALLET_DIR", "")
 WALLET_PASS = os.getenv("ORACLE_WALLET_PASSWORD", "")
 
 # APEX Workspace
-WORKSPACE_ID   = int(os.getenv("APEX_WORKSPACE_ID", "0"))
+_ws_id_str = os.getenv("APEX_WORKSPACE_ID", "0")
+try:
+    WORKSPACE_ID = int(_ws_id_str)
+except ValueError:
+    WORKSPACE_ID = 0
 WORKSPACE_NAME = os.getenv("APEX_WORKSPACE_NAME", "")
 APEX_SCHEMA    = os.getenv("APEX_SCHEMA", "")
 

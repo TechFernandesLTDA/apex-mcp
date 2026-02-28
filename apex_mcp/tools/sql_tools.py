@@ -35,6 +35,22 @@ def apex_connect(
 
     mTLS is required for Oracle Autonomous Database (TLS direct mode may not work).
     """
+    # Validate required parameters before attempting connection
+    missing = [name for name, val in [
+        ("user / ORACLE_DB_USER", user),
+        ("password / ORACLE_DB_PASS", password),
+        ("dsn / ORACLE_DSN", dsn),
+        ("wallet_dir / ORACLE_WALLET_DIR", wallet_dir),
+        ("wallet_password / ORACLE_WALLET_PASSWORD", wallet_password),
+    ] if not val]
+    if missing:
+        return json.dumps({
+            "status": "error",
+            "error": f"Missing required parameters: {', '.join(missing)}. "
+                     "Set them via environment variables or pass directly. "
+                     "Call apex_setup_guide() for full configuration instructions.",
+        }, ensure_ascii=False)
+
     try:
         msg = db.connect(
             user=user,

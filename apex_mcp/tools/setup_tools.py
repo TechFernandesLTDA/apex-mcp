@@ -248,9 +248,8 @@ def apex_check_requirements() -> str:
             masked = val[:3] + "***" if len(val) > 3 else "***"
             results.append(check(f"env:{var}", True, f"Set to: {masked}"))
         else:
-            # Check if using defaults (from config)
-            results.append(check(f"env:{var}", False, "Not set (using default from config.py)",
-                                 f"Set {var} in .mcp.json env section or export {var}=..."))
+            results.append(check(f"env:{var}", False, "Not set — required for connection",
+                                 f"Add {var} to the 'env' section of .mcp.json"))
 
     # Check wallet directory
     wallet_dir = WALLET_DIR

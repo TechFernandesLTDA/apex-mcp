@@ -110,6 +110,18 @@ class ConnectionManager:
     def set_apex_context(self, app_id: int) -> None:
         """Set APEX workspace and application context for import operations."""
         from .config import WORKSPACE_ID as _ws_id, APEX_SCHEMA as _schema, WORKSPACE_NAME as _ws_name
+        if not _ws_name:
+            raise ValueError(
+                "APEX_WORKSPACE_NAME is not set. Add it to your .mcp.json env section."
+            )
+        if not _schema:
+            raise ValueError(
+                "APEX_SCHEMA is not set. Add it to your .mcp.json env section."
+            )
+        if not _ws_id:
+            raise ValueError(
+                "APEX_WORKSPACE_ID is not set. Add it to your .mcp.json env section."
+            )
         self.plsql(f"""
 begin
   apex_util.set_workspace(p_workspace=>'{_ws_name}');
