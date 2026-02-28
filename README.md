@@ -322,6 +322,29 @@ Access your app at: `f?p=200` (relative to your APEX base URL)
 
 ---
 
+## Demo Apps
+
+The `demos/` directory contains three end-to-end build scripts that create real APEX applications. Each script runs in under 60 seconds and creates a fully functional app.
+
+| Script | App ID | Description | Pages | Features Used |
+|--------|--------|-------------|-------|---------------|
+| `build_app200.py` | 200 | Clinic & Therapist Panel | 6 | Login, Dashboard KPIs, 2× CRUD, Nav |
+| `build_app201.py` | 201 | Patient Registry | 5 | Login, Dashboard, CRUD, Validations, Computations, IR |
+| `build_app202.py` | 202 | Admin & Audit | 6 | Login, Dashboard, CRUD, Auth Scheme, AJAX handler, Dynamic Action |
+
+Run any demo against your own database:
+
+```bash
+# Edit the env vars at the top of the script, then:
+python -X utf8 demos/build_app200.py
+python -X utf8 demos/build_app201.py
+python -X utf8 demos/build_app202.py
+```
+
+> **Note:** Use `-X utf8` on Windows to avoid encoding issues with special characters.
+
+---
+
 ## CRUD Generator — How It Works
 
 `apex_generate_crud` automatically:
@@ -341,6 +364,44 @@ Access your app at: `f?p=200` (relative to your APEX base URL)
 5. **Links** the IR to the form via detail link
 
 > Works best with Oracle naming conventions (prefixed columns). For other schemas, Claude can adjust item types after generation using `apex_update_item`.
+
+---
+
+## APEX 24.2 API — Verified Parameters
+
+All PL/SQL calls were verified against Oracle-supplied APEX 24.2 sample applications. Key differences from older documentation:
+
+### `create_page`
+- Use `p_page_template_options=>'#DEFAULT#'` — **not** `p_page_template_id`
+- `p_step_template=>...` only for **login** pages
+- `p_page_mode=>'MODAL'` only for **modal** pages — omit for normal pages
+- No `p_last_updated_by` / `p_last_upd_yyyymmddhh24miss`
+
+### `create_page_plug` / `create_page_item` / `create_page_process`
+- No `p_flow_id`, `p_page_id`, `p_flow_step_id`, audit columns
+- Autocomplete → `p_tag_attributes=>'autocomplete="username"'` (not `p_attributes=>wwv_flow_t_plugin_attribute_value`)
+- `NATIVE_FORM_DML` requires `p_region_id=>wwv_flow_imp.id(...)` — handles INSERT/UPDATE/DELETE (no separate delete process)
+- No `p_process_success_message` or `p_version_scn` in processes
+
+### `create_page_validation`
+- Type names: `ITEM_NOT_NULL` (not `ITEM_IS_NOT_NULL`), `ITEM_NOT_NULL_OR_ZERO`
+- For `ITEM_NOT_NULL`: item name goes in `p_validation=>'P10_ITEM'` — **not** `p_associated_item`
+- No `p_when_button_pressed` (invalid parameter)
+
+### `create_page_process` (AJAX)
+- `p_process_point=>'ON_DEMAND'` — **not** `'AJAX_CALLBACK'`
+
+### `create_page_da_event` (Dynamic Action)
+- Requires `p_event_sequence=>10`
+- Item trigger: `p_triggering_element_type=>'ITEM'`, `p_triggering_element=>'P20_ITEM'`
+- Omit `p_triggering_condition_type` when there is no condition
+- No `p_fire_on_initialization` or `p_display_when_type` (invalid)
+
+### `create_worksheet` (Interactive Report)
+- `p_show_search_bar=>'Y'` / `'N'` — **not** `'YES'` / `'NO'`
+
+### `create_list_item`
+- No `p_version_scn`
 
 ---
 
