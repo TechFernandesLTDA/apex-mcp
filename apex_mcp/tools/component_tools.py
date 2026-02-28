@@ -46,6 +46,15 @@ def _blk(sql: str) -> str:
     return f"begin\n{sql}\nend;"
 
 
+def _sql_to_varchar2(sql: str) -> str:
+    """Convert multi-line SQL/PLSQL to wwv_flow_string.join(wwv_flow_t_varchar2(...))."""
+    lines = sql.replace("'", "''").splitlines()
+    if not lines:
+        return "''"
+    quoted = [f"'{line}'" for line in lines]
+    return "wwv_flow_string.join(wwv_flow_t_varchar2(\n" + ",\n".join(quoted) + "))"
+
+
 def _find_region_id(page_id: int, region_name: str) -> int | None:
     """Look up a region ID by page and name from session state."""
     for reg in session.regions.values():
@@ -469,6 +478,9 @@ wwv_flow_imp_page.create_page_button(
 {condition_lines}
 );"""))
 
+        # Track button ID for condition lookup in processes
+        session.buttons[f"{page_id}:{button_name.upper()}"] = button_id
+
         return json.dumps({
             "status": "ok",
             "button_id": button_id,
@@ -567,14 +579,19 @@ def apex_add_process(
                 pk_item = _ensure_item_prefix(return_pk_item, page_id)
                 attr_lines += f"\n,p_attribute_05=>'{_esc(pk_item)}'"
         elif process_type_lower in ("plsql", "ajax") and source:
-            attr_lines = f",p_process_clob_01=>'{_esc(source)}'"
+            attr_lines = (
+                f",p_process_sql_clob=>{_sql_to_varchar2(source)}"
+                f"\n,p_process_clob_language=>'PLSQL'"
+            )
 
-        # Condition (button trigger)
+        # Condition (button trigger) — needs numeric button ID via wwv_flow_imp.id()
         condition_lines = ""
         if condition_button:
-            condition_lines = (
-                f",p_process_when_button_id=>'{_esc(condition_button.upper())}'"
-            )
+            btn_key = f"{page_id}:{condition_button.upper()}"
+            btn_id = session.buttons.get(btn_key)
+            if btn_id:
+                condition_lines = f",p_process_when_button_id=>wwv_flow_imp.id({btn_id})"
+            # If button ID not found, skip condition (process runs on any submit)
 
         # Success / error messages
         success_line = f",p_success_message=>'{_esc(success_message)}'" if success_message else ""

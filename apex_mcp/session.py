@@ -58,6 +58,7 @@ class ImportSession:
     nav_items: list[dict] = field(default_factory=list)
     app_items: list[str] = field(default_factory=list)
     app_processes: list[str] = field(default_factory=list)
+    buttons: dict[str, int] = field(default_factory=dict)  # key: "{page_id}:{button_name}"
 
     _lock: threading.RLock = field(
         default_factory=threading.RLock, init=False, repr=False, compare=False
@@ -78,6 +79,7 @@ class ImportSession:
             self.nav_items.clear()
             self.app_items.clear()
             self.app_processes.clear()
+            self.buttons.clear()
 
     def summary(self) -> dict:
         return {

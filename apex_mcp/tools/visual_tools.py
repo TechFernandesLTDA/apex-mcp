@@ -4,7 +4,7 @@ import json
 from typing import Any
 from ..db import db
 from ..ids import ids
-from ..session import session, PageInfo
+from ..session import session, PageInfo, RegionInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK, REGION_TMPL_CARDS
 
 
@@ -292,7 +292,10 @@ wwv_flow_imp_page.create_jet_chart_axis(
 );"""))
 
         # Update session
-        session.regions[f"{page_id}:{region_name}"] = region_id
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, region_type="chart"
+        )
 
         return json.dumps({
             "status": "ok",
@@ -543,7 +546,10 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
 );"""))
 
-        session.regions[f"{page_id}:{region_name}"] = region_id
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, region_type="plsql"
+        )
 
         return json.dumps({
             "status": "ok",

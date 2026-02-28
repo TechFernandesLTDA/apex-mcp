@@ -316,7 +316,7 @@ wwv_flow_imp_shared.create_list_item(
 def apex_add_app_item(
     item_name: str,
     scope: str = "SESSION",
-    protection: str = "RESTRICTED",
+    protection: str = "I",
     session_state_function: str = "",
 ) -> str:
     """Create an Application Item (session-level variable accessible on all pages).
@@ -364,7 +364,6 @@ def apex_add_app_item(
 wwv_flow_imp_shared.create_flow_item(
  p_id=>wwv_flow_imp.id({item_id})
 ,p_name=>'{_esc(item_name.upper())}'
-,p_scope=>'{scope}'
 ,p_protection_level=>'{protection}'{session_state_line}
 ,p_version_scn=>1
 );""")
