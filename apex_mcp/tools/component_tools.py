@@ -143,8 +143,6 @@ def apex_add_region(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'{_esc(region_name)}'
 ,p_region_template_options=>'{tmpl_options}'
 {plug_tmpl_line}
@@ -152,8 +150,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_display_point=>'{grid_column}'
 ,p_plug_source_type=>'{apex_region_type}'
 {source_line}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # For Interactive Report regions, create the worksheet definition
@@ -162,8 +158,6 @@ wwv_flow_imp_page.create_page_plug(
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_max_row_count=>'1000000'
 ,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows. Please apply a filter to reduce the number of records in your query.'
@@ -329,8 +323,6 @@ def apex_add_item(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({item_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_name=>'{item_name}'
 ,p_item_sequence=>{sequence}
 ,p_item_plug_id=>wwv_flow_imp.id({region_id})
@@ -345,8 +337,6 @@ wwv_flow_imp_page.create_page_item(
 {default_line}
 {readonly_line}
 {colspan_line}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # Update session state
@@ -465,8 +455,6 @@ def apex_add_button(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({button_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_button_sequence=>{sequence}
 ,p_button_plug_id=>wwv_flow_imp.id({region_id})
 ,p_button_name=>'{_esc(button_name.upper())}'
@@ -479,8 +467,6 @@ wwv_flow_imp_page.create_page_button(
 {redirect_line}
 {icon_line}
 {condition_lines}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         return json.dumps({
@@ -597,8 +583,6 @@ def apex_add_process(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({process_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_process_sequence=>{sequence}
 ,p_process_point=>'{exec_point}'
 ,p_process_type=>'{apex_proc_type}'
@@ -607,8 +591,6 @@ wwv_flow_imp_page.create_page_process(
 {condition_lines}
 {success_line}
 {error_line}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # Track in session
@@ -726,10 +708,10 @@ def apex_add_dynamic_action(
         da_ev_id = ids.next(f"da_ev_{page_id}_{_esc(da_name)}")
         da_act_id = ids.next(f"da_act_{page_id}_{_esc(da_name)}")
 
-        # Trigger element line
+        # Trigger element lines (verified against APEX 24.2 exports)
         trigger_lines = ""
         if trigger_element:
-            # Determine if it looks like an item name (P\d+_...) or a button
+            # Item names look like P\d+_... ; everything else treated as jQuery selector
             if trigger_element.upper().startswith("P") and "_" in trigger_element:
                 trigger_lines = (
                     f",p_triggering_element_type=>'ITEM'"
@@ -737,29 +719,23 @@ def apex_add_dynamic_action(
                 )
             else:
                 trigger_lines = (
-                    f",p_triggering_element_type=>'BUTTON'"
-                    f"\n,p_triggering_button_id=>'{_esc(trigger_element.upper())}'"
+                    f",p_triggering_element_type=>'JQUERY_SELECTOR'"
+                    f"\n,p_triggering_element=>'{_esc(trigger_element)}'"
                 )
         else:
-            trigger_lines = ",p_triggering_element_type=>'JAVASCRIPT_EXPRESSION'\n,p_triggering_element=>'document'"
+            # Page-level event — no triggering element needed
+            trigger_lines = ""
 
-        fire_init_line = f",p_fire_on_initialization=>'{('Y' if fire_on_init else 'N')}'"
-
-        # Create the DA header
+        # Create the DA event (no p_fire_on_initialization or p_display_when_type — invalid in 24.2)
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_da_event(
  p_id=>wwv_flow_imp.id({da_id})
 ,p_name=>'{_esc(da_name)}'
-,p_page_id=>{page_id}
-,p_triggering_condition_type=>'JAVASCRIPT_EXPRESSION'
+,p_event_sequence=>{sequence}
+{trigger_lines}
 ,p_bind_type=>'bind'
 ,p_execution_type=>'IMMEDIATE'
 ,p_bind_event_type=>'{apex_event}'
-{trigger_lines}
-{fire_init_line}
-,p_display_when_type=>'ALWAYS'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # JS sanitization — warn about unsafe patterns in development context
@@ -806,8 +782,6 @@ wwv_flow_imp_page.create_page_da_action(
 ,p_action=>'{apex_action_type}'
 {action_attr_lines}
 {affected_lines}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # Create the DA action (FALSE branch) — only when false_action_type is provided
@@ -843,8 +817,6 @@ wwv_flow_imp_page.create_page_da_action(
 ,p_action=>'{false_apex_action}'
 {false_action_attr_lines}
 {false_affected_lines}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         return json.dumps({

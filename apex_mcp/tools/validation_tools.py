@@ -23,7 +23,6 @@ def apex_add_item_validation(
     error_message: str = "",
     sequence: int = 10,
     condition_item: str = "",
-    trigger_button: str = "SAVE",
 ) -> str:
     """Add a validation rule to a page item.
 
@@ -49,8 +48,6 @@ def apex_add_item_validation(
         error_message: Message shown when validation fails. Auto-generated if omitted.
         sequence: Validation execution order.
         condition_item: Only validate if this item is not null (optional).
-        trigger_button: Internal name of the button that triggers this validation (default: "SAVE").
-            Set to the exact button name used in your page (e.g., "CREATE", "SUBMIT", "APPLY_CHANGES").
 
     Returns:
         JSON with status, validation_id, validation_name.
@@ -71,17 +68,17 @@ def apex_add_item_validation(
     if not item_name.upper().startswith(expected_prefix.upper()):
         item_name = f"{expected_prefix}{item_name}"
 
-    # Map validation types to APEX native types
+    # Map validation types to APEX native types (verified against APEX 24.2 exports)
     type_map = {
-        "not_null":              "ITEM_IS_NOT_NULL",
+        "not_null":              "ITEM_NOT_NULL",
         "max_length":            "MAX_LENGTH",
         "min_length":            "MIN_LENGTH",
         "regex":                 "REGULAR_EXPRESSION",
         "plsql_expression":      "PLSQL_EXPRESSION",
         "plsql_function":        "PLSQL_FUNCTION_RETURNING_ERROR_TEXT",
-        "item_not_null_or_zero": "ITEM_IS_NOT_NULL_OR_ZERO",
+        "item_not_null_or_zero": "ITEM_NOT_NULL_OR_ZERO",
     }
-    apex_val_type = type_map.get(validation_type.lower(), "ITEM_IS_NOT_NULL")
+    apex_val_type = type_map.get(validation_type.lower(), "ITEM_NOT_NULL")
 
     # Auto error message
     if not error_message:
@@ -100,15 +97,16 @@ def apex_add_item_validation(
     try:
         val_id = ids.next(f"val_{page_id}_{_esc(validation_name)}")
 
-        # Build expression lines based on type
-        expr_lines = ""
-        if apex_val_type in ("MAX_LENGTH", "MIN_LENGTH", "REGULAR_EXPRESSION") and validation_expression:
+        # Build p_validation line — for ITEM_NOT_NULL the item name is the expression;
+        # for length/regex/plsql types the expression is the actual rule.
+        if apex_val_type == "ITEM_NOT_NULL":
+            expr_lines = f",p_validation=>'{_esc(item_name)}'"
+        elif apex_val_type == "ITEM_NOT_NULL_OR_ZERO":
+            expr_lines = f",p_validation=>'{_esc(item_name)}'"
+        elif validation_expression:
             expr_lines = f",p_validation=>'{_esc(validation_expression)}'"
-        elif apex_val_type in ("PLSQL_EXPRESSION", "PLSQL_FUNCTION_RETURNING_ERROR_TEXT") and validation_expression:
-            expr_lines = f",p_validation=>'{_esc(validation_expression)}'"
-
-        # Item association
-        item_line = f",p_associated_item=>'{_esc(item_name)}'"
+        else:
+            expr_lines = ""
 
         # Condition line
         condition_line = ""
@@ -118,19 +116,13 @@ def apex_add_item_validation(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_validation(
  p_id=>wwv_flow_imp.id({val_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_validation_name=>'{_esc(validation_name)}'
 ,p_validation_sequence=>{sequence}
 ,p_validation_type=>'{apex_val_type}'
 {expr_lines}
 ,p_error_message=>'{_esc(error_message)}'
 ,p_error_display_location=>'INLINE_WITH_FIELD_AND_NOTIFICATION'
-{item_line}
 {condition_line}
-,p_when_button_pressed=>'{_esc(trigger_button)}'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         return json.dumps({
@@ -228,16 +220,12 @@ def apex_add_item_computation(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_computation(
  p_id=>wwv_flow_imp.id({comp_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_computation_sequence=>{sequence}
 ,p_computation_item=>'{_esc(item_name)}'
 ,p_computation_point=>'{apex_point}'
 ,p_computation_type=>'{apex_comp_type}'
 ,p_computation=>'{_esc(computation_expression)}'
 {condition_line}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         return json.dumps({

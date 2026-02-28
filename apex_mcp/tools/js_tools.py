@@ -111,8 +111,6 @@ def apex_add_page_js(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'Page JavaScript'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>{REGION_TMPL_BLANK}
@@ -123,8 +121,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
 ,p_attribute_01=>'N'
 ,p_attribute_02=>'HTML'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         return json.dumps({
@@ -353,10 +349,8 @@ def apex_generate_ajax_handler(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({proc_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_process_sequence=>10
-,p_process_point=>'AJAX_CALLBACK'
+,p_process_point=>'ON_DEMAND'
 ,p_process_type=>'NATIVE_PLSQL'
 ,p_process_name=>'{_esc(upper_callback)}'
 ,p_process_sql_clob=>'{_esc(full_plsql)}'

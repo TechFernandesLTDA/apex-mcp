@@ -318,7 +318,6 @@ wwv_flow_imp_shared.create_user_interface(
 ,p_login_url=>'f?p=&APP_ID.:{login_page}:&APP_SESSION.::&DEBUG.:::'
 ,p_theme_style_by_user_pref=>false
 ,p_built_with_love=>false
-,p_global_page_id=>0
 ,p_navigation_list_id=>wwv_flow_imp.id({ID_NAV_MENU})
 ,p_navigation_list_position=>'SIDE'
 ,p_navigation_list_template_id=>{LIST_TMPL_SIDE_NAV}

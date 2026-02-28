@@ -4,7 +4,7 @@ import json
 from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo
-from ..templates import PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN, PAGE_TMPL_MODAL
+from ..templates import PAGE_TMPL_LOGIN
 from ..config import WORKSPACE_ID
 
 
@@ -72,26 +72,7 @@ def apex_add_page(
         is_public = "Y" if not auth_scheme else "N"
         auth_scheme_escaped = _esc(auth_scheme) if auth_scheme else ""
 
-        # Determine page mode and template based on page_type
         page_type_lower = page_type.lower()
-        if page_type_lower == "modal":
-            page_mode = "MODAL"
-            tmpl_id = PAGE_TMPL_MODAL
-        elif page_type_lower == "login":
-            page_mode = "NORMAL"
-            tmpl_id = PAGE_TMPL_LOGIN
-        else:
-            # blank, report, form, dashboard, global
-            page_mode = "NORMAL"
-            tmpl_id = PAGE_TMPL_STANDARD
-
-        # Allow explicit override
-        if page_template:
-            try:
-                tmpl_id = int(page_template)
-            except ValueError:
-                # If it's not numeric, treat as named template — keep computed default
-                pass
 
         # Build auth_scheme param line
         if auth_scheme:
@@ -103,6 +84,10 @@ def apex_add_page(
 
         page_id_obj = ids.next(f"page_{page_id}")
 
+        # Modal pages need p_page_mode; login pages need p_step_template; normal pages need neither
+        mode_line = ",p_page_mode=>'MODAL'" if page_type_lower == "modal" else ""
+        step_tmpl_line = f",p_step_template=>{PAGE_TMPL_LOGIN}" if page_type_lower == "login" else ""
+
         plsql = _blk(f"""
 wwv_flow_imp_page.create_page(
  p_id=>{page_id}
@@ -110,10 +95,8 @@ wwv_flow_imp_page.create_page(
 ,p_alias=>'{_esc(page_alias)}'
 ,p_step_title=>'{_esc(page_title)}'
 ,p_autocomplete_on_off=>'OFF'
-,p_page_mode=>'{page_mode}'
-,p_page_template_id=>{tmpl_id}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+{mode_line}{step_tmpl_line}
+,p_page_template_options=>'#DEFAULT#'
 {auth_line}{help_line}
 );""")
 
@@ -125,15 +108,11 @@ wwv_flow_imp_page.create_page(
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'Global Page'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>4072358936313175081
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         # Update session state
@@ -148,7 +127,6 @@ wwv_flow_imp_page.create_page_plug(
             "page_id": page_id,
             "page_name": page_name,
             "page_type": page_type_lower,
-            "page_mode": page_mode,
             "is_public": is_public,
             "auth_scheme": auth_scheme,
             "message": f"Page {page_id} '{page_name}' created successfully.",

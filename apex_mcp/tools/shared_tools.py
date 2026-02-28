@@ -283,7 +283,6 @@ wwv_flow_imp_shared.create_list_item(
 ,p_list_item_link_target=>'{target_url}'
 ,p_list_item_icon=>'{_esc(icon)}'{parent_line}{auth_line}
 ,p_list_item_current_type=>'TARGET_PAGE'
-,p_version_scn=>1
 );""")
 
         db.plsql(plsql)

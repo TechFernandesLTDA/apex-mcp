@@ -231,8 +231,13 @@ def apex_generate_crud(
                 f"SELECT {display_col} AS d, {ref_col} AS r "
                 f"FROM {ref_table} ORDER BY 1"
             )
-            lov_id = ids.next(f"lov_{fk_col.lower()}")
 
+            # Reuse existing LOV if already created in this session (shared across pages)
+            if lov_name in session.lovs:
+                lov_ids[fk_col] = session.lovs[lov_name].lov_id
+                continue
+
+            lov_id = ids.next(f"lov_{fk_col.lower()}")
             db.plsql(_blk(f"""
 wwv_flow_imp_shared.create_list_of_values(
  p_id=>wwv_flow_imp.id({lov_id})
@@ -265,10 +270,7 @@ wwv_flow_imp_page.create_page(
 ,p_alias=>'{_esc(list_page_name.upper().replace(" ", "-"))}'
 ,p_step_title=>'{_esc(list_page_name)}'
 ,p_autocomplete_on_off=>'OFF'
-,p_page_mode=>'NORMAL'
-,p_page_template_id=>{PAGE_TMPL_STANDARD}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+,p_page_template_options=>'#DEFAULT#'
 {_auth_lines(auth_scheme)}
 );"""))
         session.pages[list_page_id] = PageInfo(
@@ -303,8 +305,6 @@ wwv_flow_imp_page.create_page(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({ir_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{list_page_id}
 ,p_plug_name=>'{_esc(list_page_name)}'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>{REGION_TMPL_IR}
@@ -313,8 +313,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_query_type=>'SQL'
 ,p_plug_source=>'{_esc(ir_sql)}'
 ,p_plug_source_type=>'NATIVE_IR'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.regions[ir_region_id] = RegionInfo(
             region_id=ir_region_id,
@@ -336,8 +334,8 @@ wwv_flow_imp_page.create_worksheet(
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
-,p_show_search_bar=>'{("YES" if include_search else "NO")}'
-,p_show_actions_menu=>'YES'
+,p_show_search_bar=>'{("Y" if include_search else "N")}'
+,p_show_actions_menu=>'Y'
 ,p_show_detail_link=>'C'
 ,p_detail_link=>'{_esc(edit_link)}'
 ,p_detail_link_text=>'<span aria-label="Edit"><span class="fa fa-edit" aria-hidden="true" title="Edit"></span></span>'
@@ -385,8 +383,6 @@ wwv_flow_imp_page.create_worksheet_rpt(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({new_btn_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{list_page_id}
 ,p_button_sequence=>10
 ,p_button_plug_id=>wwv_flow_imp.id({ir_region_id})
 ,p_button_name=>'CREATE'
@@ -408,10 +404,7 @@ wwv_flow_imp_page.create_page(
 ,p_alias=>'{_esc(form_page_name.upper().replace(" ", "-"))}'
 ,p_step_title=>'{_esc(form_page_name)}'
 ,p_autocomplete_on_off=>'OFF'
-,p_page_mode=>'NORMAL'
-,p_page_template_id=>{PAGE_TMPL_STANDARD}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+,p_page_template_options=>'#DEFAULT#'
 {_auth_lines(auth_scheme)}
 );"""))
         session.pages[form_page_id] = PageInfo(
@@ -426,16 +419,12 @@ wwv_flow_imp_page.create_page(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({form_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{form_page_id}
 ,p_plug_name=>'{_esc(form_page_name)}'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>{REGION_TMPL_STANDARD}
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
 ,p_plug_source_type=>'NATIVE_FORM'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.regions[form_region_id] = RegionInfo(
             region_id=form_region_id,
@@ -474,8 +463,6 @@ wwv_flow_imp_page.create_page_plug(
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({item_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_name=>'{_esc(item_name)}'
 ,p_item_sequence=>{item_seq}
 ,p_item_plug_id=>wwv_flow_imp.id({form_region_id})
@@ -504,15 +491,11 @@ wwv_flow_imp_page.create_page_item(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({btn_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{form_page_id}
 ,p_plug_name=>'Buttons'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>2126429139436695430
 ,p_plug_display_sequence=>20
 ,p_plug_display_point=>'REGION_POSITION_03'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
         cancel_url = f"f?p=&APP_ID.:{list_page_id}:&SESSION.::&DEBUG.:::"
@@ -522,8 +505,6 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({cancel_btn_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_button_sequence=>10
 ,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
 ,p_button_name=>'CANCEL'
@@ -552,8 +533,6 @@ wwv_flow_imp_page.create_page_button(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({delete_btn_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_button_sequence=>20
 ,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
 ,p_button_name=>'DELETE'
@@ -573,8 +552,6 @@ wwv_flow_imp_page.create_page_button(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({save_btn_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_button_sequence=>30
 ,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
 ,p_button_name=>'SAVE'
@@ -604,10 +581,9 @@ wwv_flow_imp_page.create_page_button(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({proc_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_process_sequence=>10
 ,p_process_point=>'AFTER_SUBMIT'
+,p_region_id=>wwv_flow_imp.id({form_region_id})
 ,p_process_type=>'NATIVE_FORM_DML'
 ,p_process_name=>'Process Form {_esc(upper_table)}'
 ,p_attribute_01=>'REGION_SOURCE'
@@ -615,40 +591,15 @@ wwv_flow_imp_page.create_page_process(
 ,p_attribute_06=>'Y'
 ,p_attribute_08=>'Y'
 ,p_error_display_location=>'INLINE_IN_NOTIFICATION'
-,p_process_when_button_id=>wwv_flow_imp.id({save_btn_id})
-,p_process_success_message=>'Record saved.'
-,p_version_scn=>1
 );"""))
         log.append("DML process created")
 
-        # Delete process
-        del_proc_id = ids.next(f"proc_del_{form_page_id}")
-        db.plsql(_blk(f"""
-wwv_flow_imp_page.create_page_process(
- p_id=>wwv_flow_imp.id({del_proc_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
-,p_process_sequence=>20
-,p_process_point=>'AFTER_SUBMIT'
-,p_process_type=>'NATIVE_FORM_DML'
-,p_process_name=>'Delete Record'
-,p_attribute_01=>'REGION_SOURCE'
-,p_attribute_05=>'Y'
-,p_attribute_06=>'Y'
-,p_attribute_08=>'Y'
-,p_error_display_location=>'INLINE_IN_NOTIFICATION'
-,p_process_when_button_id=>wwv_flow_imp.id({delete_btn_id})
-,p_process_success_message=>'Record deleted.'
-,p_version_scn=>1
-);"""))
 
         # After delete/save: redirect to list page
         redirect_proc_id = ids.next(f"proc_redirect_{form_page_id}")
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({redirect_proc_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{form_page_id}
 ,p_process_sequence=>30
 ,p_process_point=>'AFTER_SUBMIT'
 ,p_process_type=>'NATIVE_SESSION_STATE'
@@ -666,8 +617,6 @@ wwv_flow_imp_page.create_page_process(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_da_event(
  p_id=>wwv_flow_imp.id({nav_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{form_page_id}
 ,p_name=>'Cancel Dialog'
 ,p_event_sequence=>10
 ,p_triggering_element_type=>'BUTTON'
@@ -758,27 +707,27 @@ def apex_generate_dashboard(
     default_ir_sql = ir_sql or "SELECT table_name, num_rows FROM user_tables ORDER BY table_name"
 
     try:
-        # ── Create the page ───────────────────────────────────────────────
-        db.plsql(_blk(f"""
+        # ── Create the page (skip if already created via apex_add_page) ──
+        if page_id not in session.pages:
+            db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page(
  p_id=>{page_id}
 ,p_name=>'{_esc(page_name)}'
 ,p_alias=>'{_esc(page_name.upper().replace(" ", "-"))}'
 ,p_step_title=>'{_esc(page_name)}'
 ,p_autocomplete_on_off=>'OFF'
-,p_page_mode=>'NORMAL'
-,p_page_template_id=>{PAGE_TMPL_STANDARD}
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+,p_page_template_options=>'#DEFAULT#'
 ,p_page_is_public_y_n=>'Y'
 ,p_protection_level=>'C'
 );"""))
-        session.pages[page_id] = PageInfo(
-            page_id=page_id,
-            page_name=page_name,
-            page_type="dashboard",
-        )
-        log.append(f"Dashboard page {page_id} created")
+            session.pages[page_id] = PageInfo(
+                page_id=page_id,
+                page_name=page_name,
+                page_type="dashboard",
+            )
+            log.append(f"Dashboard page {page_id} created")
+        else:
+            log.append(f"Dashboard page {page_id} already exists — adding content only")
 
         # ── KPI cards: single PL/SQL region with UT42 Cards grid layout ──
         # All KPI cards are rendered inside one NATIVE_PLSQL region using
@@ -822,8 +771,6 @@ wwv_flow_imp_page.create_page(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({kpi_container_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'KPI Cards'
 ,p_region_template_options=>'#DEFAULT#:t-Region--noPadding:t-Region--hideHeader:t-Region--scrollBody'
 ,p_plug_template=>{REGION_TMPL_BLANK}
@@ -831,8 +778,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_display_point=>'BODY'
 ,p_plug_source=>'{_esc(kpi_plsql_source)}'
 ,p_plug_source_type=>'NATIVE_PLSQL'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.regions[kpi_container_id] = RegionInfo(
             region_id=kpi_container_id,
@@ -847,8 +792,6 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({ir_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'{_esc(ir_title)}'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>{REGION_TMPL_IR}
@@ -857,8 +800,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_query_type=>'SQL'
 ,p_plug_source=>'{_esc(default_ir_sql)}'
 ,p_plug_source_type=>'NATIVE_IR'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.regions[ir_region_id] = RegionInfo(
             region_id=ir_region_id,
@@ -880,8 +821,8 @@ wwv_flow_imp_page.create_worksheet(
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
-,p_show_search_bar=>'YES'
-,p_show_actions_menu=>'YES'
+,p_show_search_bar=>'Y'
+,p_show_actions_menu=>'Y'
 ,p_show_detail_link=>'N'
 ,p_owner=>'APEX_MCP'
 ,p_internal_uid=>{ws_id}
@@ -984,12 +925,10 @@ wwv_flow_imp_page.create_page(
 ,p_alias=>'LOGIN'
 ,p_step_title=>'{_esc(page_name)}'
 ,p_autocomplete_on_off=>'OFF'
-,p_page_mode=>'NORMAL'
-,p_page_template_id=>{PAGE_TMPL_LOGIN}
+,p_step_template=>{PAGE_TMPL_LOGIN}
+,p_page_template_options=>'#DEFAULT#'
 ,p_page_is_public_y_n=>'Y'
 ,p_protection_level=>'C'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.pages[page_id] = PageInfo(
             page_id=page_id,
@@ -1003,16 +942,12 @@ wwv_flow_imp_page.create_page(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({login_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
 ,p_plug_name=>'{_esc(effective_app_name)}'
 ,p_icon_css_classes=>'app-login-icon'
 ,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>2101018444965420270
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
         session.regions[login_region_id] = RegionInfo(
             region_id=login_region_id,
@@ -1027,8 +962,6 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({username_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_name=>'{_esc(username_item)}'
 ,p_item_sequence=>10
 ,p_item_plug_id=>wwv_flow_imp.id({login_region_id})
@@ -1037,12 +970,10 @@ wwv_flow_imp_page.create_page_item(
 ,p_display_as=>'{ITEM_TEXT}'
 ,p_cSize=>40
 ,p_cMaxlength=>100
+,p_tag_attributes=>'autocomplete="username"'
 ,p_label_alignment=>'RIGHT'
 ,p_field_template=>{LABEL_OPTIONAL}
 ,p_item_template_options=>'#DEFAULT#'
-,p_is_required=>false
-,p_warn_on_unsaved_changes=>'I'
-,p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_plugin_attribute_value('autocomplete', 'username'))
 );"""))
         session.items[username_item] = ItemInfo(
             item_id=username_id,
@@ -1057,8 +988,6 @@ wwv_flow_imp_page.create_page_item(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({password_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_name=>'{_esc(password_item)}'
 ,p_item_sequence=>20
 ,p_item_plug_id=>wwv_flow_imp.id({login_region_id})
@@ -1070,9 +999,7 @@ wwv_flow_imp_page.create_page_item(
 ,p_label_alignment=>'RIGHT'
 ,p_field_template=>{LABEL_OPTIONAL}
 ,p_item_template_options=>'#DEFAULT#'
-,p_is_required=>false
-,p_warn_on_unsaved_changes=>'I'
-,p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_plugin_attribute_value('autocomplete', 'current-password'))
+,p_tag_attributes=>'autocomplete="current-password"'
 );"""))
         session.items[password_item] = ItemInfo(
             item_id=password_id,
@@ -1087,8 +1014,6 @@ wwv_flow_imp_page.create_page_item(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({signin_btn_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_button_sequence=>30
 ,p_button_plug_id=>wwv_flow_imp.id({login_region_id})
 ,p_button_name=>'LOGIN'
@@ -1106,8 +1031,6 @@ wwv_flow_imp_page.create_page_button(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({auth_proc_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_flow_step_id=>{page_id}
 ,p_process_sequence=>10
 ,p_process_point=>'AFTER_SUBMIT'
 ,p_process_type=>'NATIVE_PLSQL'
