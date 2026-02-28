@@ -109,12 +109,13 @@ class ConnectionManager:
 
     def set_apex_context(self, app_id: int) -> None:
         """Set APEX workspace and application context for import operations."""
+        from .config import WORKSPACE_ID as _ws_id, APEX_SCHEMA as _schema, WORKSPACE_NAME as _ws_name
         self.plsql(f"""
 begin
-  apex_util.set_workspace(p_workspace=>'TEA');
-  wwv_flow_application_install.set_workspace_id({WORKSPACE_ID});
+  apex_util.set_workspace(p_workspace=>'{_ws_name}');
+  wwv_flow_application_install.set_workspace_id({_ws_id});
   wwv_flow_application_install.set_application_id({app_id});
-  wwv_flow_application_install.set_schema('{APEX_SCHEMA}');
+  wwv_flow_application_install.set_schema('{_schema}');
   wwv_flow_application_install.set_application_name(null);
   wwv_flow_application_install.set_application_alias(null);
   wwv_flow_application_install.set_image_prefix(null);

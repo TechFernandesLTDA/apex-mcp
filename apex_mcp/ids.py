@@ -1,10 +1,10 @@
 """Unique ID generator for APEX import operations.
 
 IDs must be large integers unique within an import session.
-Base: 8_900_000_000_000_000 + session_salt + sequential counter.
+Formula: 8_900_000_000_000_000 + (random_salt % 1_000_000) * 1_000_000 + counter.
 """
 from __future__ import annotations
-import time
+import os
 import threading
 
 
@@ -15,15 +15,15 @@ class IdGenerator:
     _lock = threading.Lock()
 
     def __init__(self):
-        # Salt derived from session start time (last 4 digits of ms timestamp)
-        self._salt = int(time.time() * 1000) % 10_000
+        # Salt from OS random bytes — 1M possible values, collision-resistant across sessions
+        self._salt = int.from_bytes(os.urandom(4), "big") % 1_000_000
         self._counter = 0
         self._registry: dict[str, int] = {}
 
     def reset(self) -> None:
         """Reset counter and registry for a new app session."""
         with self._lock:
-            self._salt = int(time.time() * 1000) % 10_000
+            self._salt = int.from_bytes(os.urandom(4), "big") % 1_000_000
             self._counter = 0
             self._registry = {}
 

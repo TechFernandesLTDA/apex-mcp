@@ -50,7 +50,7 @@ def apex_setup_guide() -> str:
                 ],
             },
             "python_packages": {
-                "required": ["fastmcp>=2.0.0", "oracledb>=2.0.0"],
+                "required": ["fastmcp>=3.0.0", "oracledb>=2.0.0"],
                 "install_command": "pip install fastmcp oracledb",
                 "python_version": ">=3.11",
             },
@@ -254,7 +254,11 @@ def apex_check_requirements() -> str:
 
     # Check wallet directory
     wallet_dir = WALLET_DIR
-    if os.path.isdir(wallet_dir):
+    if not wallet_dir:
+        results.append(check("wallet directory", False,
+                             "ORACLE_WALLET_DIR is not set",
+                             "Set ORACLE_WALLET_DIR to the extracted wallet directory path in .mcp.json"))
+    elif os.path.isdir(wallet_dir):
         required_files = ["tnsnames.ora", "sqlnet.ora", "cwallet.sso"]
         found = [f for f in required_files if os.path.exists(os.path.join(wallet_dir, f))]
         missing = [f for f in required_files if f not in [os.path.basename(x) for x in found]]

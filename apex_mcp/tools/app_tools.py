@@ -28,7 +28,7 @@ def apex_list_apps() -> str:
         - User must have SELECT on APEX_APPLICATIONS view (granted to APEX schema users)
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     rows = db.execute("""
         SELECT application_id,
@@ -474,21 +474,27 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
         # Returns only the first 4000 chars as preview (no file saved).
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
-        rows = db.execute("""
-            SELECT f.name,
-                   DBMS_LOB.SUBSTR(f.contents, 4000, 1) AS content_start
-              FROM TABLE(apex_export.get_application(
-                     p_application_id         => :app_id,
-                     p_split                  => false,
-                     p_with_date              => true,
-                     p_with_ir_public_reports => false
-                   )) f
-        """, {"app_id": app_id})
+        # Read the full CLOB via a direct cursor (avoids DBMS_LOB.SUBSTR 4000-char limit)
+        c = db.conn
+        cur = c.cursor()
+        try:
+            cur.execute("""
+                SELECT f.name, f.contents
+                  FROM TABLE(apex_export.get_application(
+                         p_application_id         => :app_id,
+                         p_split                  => 0,
+                         p_with_date              => 1,
+                         p_with_ir_public_reports => 0
+                       )) f
+            """, {"app_id": app_id})
+            row = cur.fetchone()
+        finally:
+            cur.close()
 
-        if not rows:
+        if not row:
             return json.dumps({
                 "status": "error",
                 "app_id": app_id,
@@ -496,30 +502,31 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
                          "Verify the application exists and you have access.",
             }, ensure_ascii=False, indent=2)
 
-        file_name = rows[0].get("NAME") or rows[0].get("name") or f"f{app_id}.sql"
-        content_start = rows[0].get("CONTENT_START") or rows[0].get("content_start") or ""
+        file_name = row[0] or f"f{app_id}.sql"
+        raw_content = row[1]
+        # oracledb may return a LOB object (large CLOBs) or a str (small CLOBs)
+        content: str = raw_content.read() if hasattr(raw_content, "read") else (raw_content or "")
 
         result: dict = {
             "status": "ok",
             "app_id": app_id,
             "file_name": file_name,
-            "content_preview": content_start[:500],
+            "content_size_chars": len(content),
+            "content_preview": content[:500],
         }
 
         if output_path:
             with open(output_path, "w", encoding="utf-8") as fh:
-                fh.write(content_start)
+                fh.write(content)
             result["saved_to"] = output_path
             result["message"] = (
-                f"Application {app_id} exported to '{output_path}'. "
-                "Note: only the first 4000 characters were written via DBMS_LOB.SUBSTR. "
-                f"For a complete export, use SQLcl: apex export -applicationid {app_id}."
+                f"Application {app_id} exported to '{output_path}' "
+                f"({len(content):,} characters)."
             )
         else:
             result["message"] = (
-                f"Application {app_id} export preview (first 4000 chars). "
-                "Provide output_path to save the full file, or use SQLcl for a complete export: "
-                f"apex export -applicationid {app_id}."
+                f"Application {app_id} export preview (first 500 of {len(content):,} chars). "
+                f"Provide output_path to save the complete file."
             )
 
         return json.dumps(result, ensure_ascii=False, indent=2)

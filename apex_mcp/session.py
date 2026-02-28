@@ -1,5 +1,6 @@
 """Import session state tracking."""
 from __future__ import annotations
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -58,20 +59,25 @@ class ImportSession:
     app_items: list[str] = field(default_factory=list)
     app_processes: list[str] = field(default_factory=list)
 
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock, init=False, repr=False, compare=False
+    )
+
     def reset(self) -> None:
-        self.app_id = None
-        self.app_name = None
-        self.workspace_id = None
-        self.import_begun = False
-        self.import_ended = False
-        self.pages.clear()
-        self.regions.clear()
-        self.items.clear()
-        self.lovs.clear()
-        self.auth_schemes.clear()
-        self.nav_items.clear()
-        self.app_items.clear()
-        self.app_processes.clear()
+        with self._lock:
+            self.app_id = None
+            self.app_name = None
+            self.workspace_id = None
+            self.import_begun = False
+            self.import_ended = False
+            self.pages.clear()
+            self.regions.clear()
+            self.items.clear()
+            self.lovs.clear()
+            self.auth_schemes.clear()
+            self.nav_items.clear()
+            self.app_items.clear()
+            self.app_processes.clear()
 
     def summary(self) -> dict:
         return {

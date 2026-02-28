@@ -23,6 +23,7 @@ def apex_add_item_validation(
     error_message: str = "",
     sequence: int = 10,
     condition_item: str = "",
+    trigger_button: str = "SAVE",
 ) -> str:
     """Add a validation rule to a page item.
 
@@ -48,6 +49,8 @@ def apex_add_item_validation(
         error_message: Message shown when validation fails. Auto-generated if omitted.
         sequence: Validation execution order.
         condition_item: Only validate if this item is not null (optional).
+        trigger_button: Internal name of the button that triggers this validation (default: "SAVE").
+            Set to the exact button name used in your page (e.g., "CREATE", "SUBMIT", "APPLY_CHANGES").
 
     Returns:
         JSON with status, validation_id, validation_name.
@@ -125,7 +128,7 @@ wwv_flow_imp_page.create_page_validation(
 ,p_error_display_location=>'INLINE_WITH_FIELD_AND_NOTIFICATION'
 {item_line}
 {condition_line}
-,p_when_button_pressed=>'SAVE'
+,p_when_button_pressed=>'{_esc(trigger_button)}'
 ,p_last_updated_by=>'APEX_MCP'
 ,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))

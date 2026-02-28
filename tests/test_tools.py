@@ -112,9 +112,9 @@ class TestSchemaToolsUnit:
 class TestAppToolsUnit:
     def test_list_apps_errors_without_connection(self):
         from apex_mcp.tools.app_tools import apex_list_apps
-        # Should return "Not connected" string (consistent return TBD)
-        result_str = apex_list_apps()
-        assert "connect" in result_str.lower() or "error" in result_str.lower()
+        result = json.loads(apex_list_apps())
+        assert result["status"] == "error"
+        assert "connect" in result["error"].lower()
 
     def test_finalize_errors_without_session(self):
         from apex_mcp.tools.app_tools import apex_finalize_app
