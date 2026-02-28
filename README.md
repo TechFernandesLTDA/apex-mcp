@@ -37,6 +37,7 @@
 | **JavaScript** | 3 | Page JS, global JS, AJAX handler generator |
 | **Inspection & Editing** | 14 | Read/update/delete/diff existing app components |
 | **Validations & Computations** | 2 | Item validations, item computations |
+| **Visuals** | 3 | JET charts (bar/line/area/pie/donut), animated metric cards, analytics page generator |
 | **User Management** | 2 | Create/list APEX workspace users |
 
 ---
@@ -313,6 +314,34 @@ Access your app at: `f?p=200` (relative to your APEX base URL)
 | `apex_delete_region(app_id, page_id, region_name)` | Delete a region |
 | `apex_copy_page(src_app, src_page, tgt_app, tgt_page, ...)` | Copy page between apps |
 
+### Visuals — JET Charts & Metric Cards
+
+| Tool | Description |
+|------|-------------|
+| `apex_add_jet_chart(page_id, region_name, chart_type, sql_query, ...)` | Oracle JET chart: bar / bar_horizontal / line / area / pie / donut / combo |
+| `apex_add_metric_cards(page_id, region_name, metrics, style?, columns?)` | Animated metric tiles with inline HTML+JS — styles: gradient / white / dark |
+| `apex_generate_analytics_page(page_id, page_name, metrics, charts, ...)` | Full analytics page in one call: metric cards + multiple JET charts |
+
+**`apex_add_jet_chart` chart types:**
+
+| type | Best for |
+|------|----------|
+| `bar` | Categorical comparisons |
+| `bar_horizontal` | Ranked lists (top N items) |
+| `line` | Time-series trends |
+| `area` | Cumulative / stacked data |
+| `pie` | Distribution (max 8 slices) |
+| `donut` | Distribution with center space for KPI |
+| `combo` | Bar + line on same axes (use `extra_series`) |
+
+**`apex_add_metric_cards` styles:**
+
+| style | Appearance |
+|-------|------------|
+| `gradient` | Colored gradient background, white text, animated counter |
+| `white` | White card with colored left border accent |
+| `dark` | Dark background with neon accent color |
+
 ### User Management
 
 | Tool | Description |
@@ -331,6 +360,7 @@ The `demos/` directory contains three end-to-end build scripts that create real 
 | `build_app200.py` | 200 | Clinic & Therapist Panel | 6 | Login, Dashboard KPIs, 2× CRUD, Nav |
 | `build_app201.py` | 201 | Patient Registry | 5 | Login, Dashboard, CRUD, Validations, Computations, IR |
 | `build_app202.py` | 202 | Admin & Audit | 6 | Login, Dashboard, CRUD, Auth Scheme, AJAX handler, Dynamic Action |
+| `build_app203.py` | 203 | Analytics Dashboard | 4 | JET bar/pie/donut/horizontal charts, gradient & white metric cards, apex_generate_analytics_page |
 
 Run any demo against your own database:
 

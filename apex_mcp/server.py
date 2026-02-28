@@ -71,6 +71,11 @@ from .tools.setup_tools import (
     apex_fix_permissions,
 )
 from .tools.validation_tools import apex_add_item_validation, apex_add_item_computation
+from .tools.visual_tools import (
+    apex_add_jet_chart,
+    apex_add_metric_cards,
+    apex_generate_analytics_page,
+)
 
 # ── Server definition ─────────────────────────────────────────────────────────
 mcp = FastMCP(
@@ -116,6 +121,28 @@ apex_generate_ajax_handler(10, "SEARCH_DATA",
     "SELECT * FROM my_table WHERE name LIKE :P10_SEARCH || '%'")
 apex_add_dynamic_action(10, "On Search Click", "click", "P10_SEARCH_BTN",
     "execute_javascript", "searchData();")
+```
+
+## Modern Analytics & Visualizations
+```
+# Full analytics page (metrics + charts) in one call:
+apex_generate_analytics_page(
+    page_id=5, page_name="Analytics",
+    metrics=[
+        {"label": "Total", "sql": "SELECT COUNT(*) FROM MY_TABLE", "icon": "fa-database", "color": "blue"},
+    ],
+    charts=[
+        {"region_name": "By Status", "chart_type": "pie",
+         "sql_query": "SELECT STATUS LABEL, COUNT(*) VALUE FROM MY_TABLE GROUP BY STATUS"},
+        {"region_name": "Monthly Trend", "chart_type": "line",
+         "sql_query": "SELECT TO_CHAR(CREATED,'MM/YYYY') LABEL, COUNT(*) VALUE FROM MY_TABLE GROUP BY TO_CHAR(CREATED,'MM/YYYY') ORDER BY 1"},
+    ]
+)
+
+# Or add individual components:
+apex_add_metric_cards(page_id=5, region_name="KPIs", style="gradient", metrics=[...])
+apex_add_jet_chart(page_id=5, region_name="Trend", chart_type="bar",
+    sql_query="SELECT col1 LABEL, col2 VALUE FROM my_table ORDER BY 1")
 ```
 
 ## Key Conventions (APEX Best Practices)
@@ -205,6 +232,11 @@ mcp.tool()(apex_diff_app)
 # Validations & computations
 mcp.tool()(apex_add_item_validation)
 mcp.tool()(apex_add_item_computation)
+
+# Visual tools (JET charts + inline HTML/JS metric cards)
+mcp.tool()(apex_add_jet_chart)
+mcp.tool()(apex_add_metric_cards)
+mcp.tool()(apex_generate_analytics_page)
 
 
 def main():
