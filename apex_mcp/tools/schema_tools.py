@@ -136,6 +136,179 @@ def apex_list_tables(
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
 
 
+def apex_detect_relationships(tables: list[str]) -> str:
+    """Detect FK relationships between a given set of tables and suggest APEX components.
+
+    Queries ``user_constraints`` and ``user_cons_columns`` to find all foreign-key
+    relationships that involve the specified tables — both internal (from-table and
+    to-table both in the list) and external (one side is outside the list).
+
+    Args:
+        tables: List of table names to analyse (case-insensitive).
+                Example: ["ORDERS", "CUSTOMERS", "ORDER_ITEMS", "PRODUCTS"]
+
+    Returns:
+        JSON with:
+        {
+          "status": "ok",
+          "tables": ["TABLE_A", "TABLE_B", ...],
+          "relationships": [
+            {
+              "from_table": "ORDERS",
+              "from_column": "CUSTOMER_ID",
+              "to_table": "CUSTOMERS",
+              "to_column": "ID",
+              "constraint_name": "FK_ORD_CUST",
+              "internal": true,
+              "suggested_component": "master_detail | select_lov | cascade_filter"
+            }
+          ],
+          "suggestions": [
+            "ORDERS -> CUSTOMERS: consider master-detail page",
+            ...
+          ]
+        }
+
+    ``suggested_component`` logic:
+    - If ``from_table`` has many FK rows pointing to ``to_table``
+      (i.e. ``to_table`` is a parent / lookup) -> "master_detail"
+      when the FK is internal (both tables in the list), otherwise -> "select_lov"
+    - External FK references (to_table not in the input list) -> "select_lov"
+
+    ``internal`` is True when both the from_table and the to_table are in the
+    provided ``tables`` list.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    if not tables:
+        return json.dumps({"status": "error", "error": "At least one table name is required."})
+
+    upper_tables: list[str] = [t.upper() for t in tables]
+    upper_set: set[str] = set(upper_tables)
+
+    try:
+        # ── 1. Find all FK constraints where the from-table is in our list ──
+        # We use a single query joining user_constraints (FK side) with
+        # user_constraints (PK/UK referenced side) and user_cons_columns for
+        # both sides to get column names.
+        #
+        # Oracle does not support binding a list directly, so we query all FKs
+        # for each table individually and aggregate in Python.
+        all_fks: list[dict] = []
+
+        for tbl in upper_tables:
+            fk_rows = db.execute("""
+                SELECT c.constraint_name,
+                       cc.column_name     AS from_column,
+                       rc.table_name      AS to_table,
+                       rcc.column_name    AS to_column
+                  FROM user_constraints   c
+                  JOIN user_cons_columns  cc
+                    ON cc.constraint_name = c.constraint_name
+                   AND cc.position        = 1
+                  JOIN user_constraints   rc
+                    ON rc.constraint_name = c.r_constraint_name
+                  JOIN user_cons_columns  rcc
+                    ON rcc.constraint_name = rc.constraint_name
+                   AND rcc.position        = 1
+                 WHERE c.table_name      = :tname
+                   AND c.constraint_type = 'R'
+                 ORDER BY c.constraint_name
+            """, {"tname": tbl})
+
+            for row in fk_rows:
+                all_fks.append({
+                    "from_table":       tbl,
+                    "from_column":      row["FROM_COLUMN"],
+                    "to_table":         row["TO_TABLE"],
+                    "to_column":        row["TO_COLUMN"],
+                    "constraint_name":  row["CONSTRAINT_NAME"],
+                })
+
+        # ── 2. Deduplicate (same constraint may appear from multiple tables) ──
+        seen_constraints: set[str] = set()
+        unique_fks: list[dict] = []
+        for fk in all_fks:
+            if fk["constraint_name"] not in seen_constraints:
+                seen_constraints.add(fk["constraint_name"])
+                unique_fks.append(fk)
+
+        # ── 3. Estimate row-counts for all involved tables (from stats) ───────
+        # Used to decide master_detail vs select_lov: if from_table num_rows >>
+        # to_table num_rows, to_table is a lookup and from_table is the detail.
+        involved_tables: set[str] = upper_set.copy()
+        for fk in unique_fks:
+            involved_tables.add(fk["to_table"])
+
+        row_count_map: dict[str, int] = {}
+        for itbl in involved_tables:
+            rc_rows = db.execute(
+                "SELECT num_rows FROM user_tables WHERE table_name = :tname",
+                {"tname": itbl},
+            )
+            if rc_rows and rc_rows[0]["NUM_ROWS"] is not None:
+                row_count_map[itbl] = int(rc_rows[0]["NUM_ROWS"])
+            else:
+                row_count_map[itbl] = 0
+
+        # ── 4. Build relationship list with suggested_component ───────────────
+        relationships: list[dict] = []
+        suggestions: list[str] = []
+
+        for fk in unique_fks:
+            from_tbl = fk["from_table"]
+            to_tbl   = fk["to_table"]
+            internal = to_tbl in upper_set
+
+            from_rows = row_count_map.get(from_tbl, 0)
+            to_rows   = row_count_map.get(to_tbl,   0)
+
+            # Heuristic: if the referenced (parent) table has significantly
+            # fewer rows it is a lookup/parent -> master_detail when internal,
+            # select_lov otherwise.  When we cannot distinguish, default to
+            # select_lov for external references.
+            if internal and to_rows > 0 and from_rows >= to_rows:
+                suggested = "master_detail"
+                suggestion_text = (
+                    f"{from_tbl} -> {to_tbl}: consider master-detail page "
+                    f"(both tables in scope; {from_tbl} is the detail side)"
+                )
+            elif internal:
+                suggested = "select_lov"
+                suggestion_text = (
+                    f"{from_tbl} -> {to_tbl}: consider select LOV on "
+                    f"{fk['from_column']} (both tables in scope)"
+                )
+            else:
+                suggested = "select_lov"
+                suggestion_text = (
+                    f"{from_tbl} -> {to_tbl}: external reference; "
+                    f"add a select LOV for {fk['from_column']} pointing to {to_tbl}"
+                )
+
+            relationships.append({
+                "from_table":          from_tbl,
+                "from_column":         fk["from_column"],
+                "to_table":            to_tbl,
+                "to_column":           fk["to_column"],
+                "constraint_name":     fk["constraint_name"],
+                "internal":            internal,
+                "suggested_component": suggested,
+            })
+            suggestions.append(suggestion_text)
+
+        return json.dumps({
+            "status":        "ok",
+            "tables":        upper_tables,
+            "relationships": relationships,
+            "suggestions":   suggestions,
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
 def apex_describe_table(table_name: str) -> str:
     """Get detailed metadata for a specific database table.
 

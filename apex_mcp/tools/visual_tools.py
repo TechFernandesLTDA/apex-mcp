@@ -1132,3 +1132,151 @@ def apex_generate_analytics_page(
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ── Tool 6: JET Calendar ──────────────────────────────────────────────────────
+
+def apex_add_calendar(
+    page_id: int,
+    region_name: str,
+    sql_query: str,
+    date_column: str,
+    title_column: str,
+    end_date_column: str | None = None,
+    display_as: str = "month",   # month | week | day | list
+    sequence: int = 10,
+    auth_scheme: str | None = None,
+) -> str:
+    """Add a JET Calendar region to a page (APEX 24.2 native calendar).
+
+    Creates a NATIVE_JET_CHART region with chart_type='calendar'. The SQL query
+    must return at minimum a date column and a title column.
+
+    Args:
+        page_id: Target page ID.
+        region_name: Region title shown in the APEX page.
+        sql_query: SQL query returning event data. Must include at minimum
+            the date_column and title_column.
+            Example: "SELECT DT_AVALIACAO, DS_BENEFICIARIO, DT_FIM
+                        FROM TEA_AVALIACOES WHERE DS_STATUS != 'CANCELADA'"
+        date_column: Column name for the event start date/datetime.
+        title_column: Column name for the event title/label.
+        end_date_column: Optional column for the event end date/datetime.
+        display_as: Default calendar view: "month" | "week" | "day" | "list".
+        sequence: Region display order on the page.
+        auth_scheme: Optional authorization scheme name.
+
+    Returns:
+        JSON with status, page_id, region_name, region_id, chart_id.
+
+    Best practices:
+        - Date columns should be DATE or TIMESTAMP type
+        - Use end_date_column for multi-day or timed events
+        - Keep SQL lightweight -- calendar renders one row per event
+        - Filter cancelled/inactive records in the WHERE clause
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
+    if not sql_query.strip():
+        return json.dumps({"status": "error", "error": "sql_query is required."})
+    if not date_column.strip():
+        return json.dumps({"status": "error", "error": "date_column is required."})
+    if not title_column.strip():
+        return json.dumps({"status": "error", "error": "title_column is required."})
+
+    valid_views = {"month", "week", "day", "list"}
+    view = display_as.lower().strip()
+    if view not in valid_views:
+        return json.dumps({
+            "status": "error",
+            "error": f"display_as '{display_as}' is not valid. Valid values: {sorted(valid_views)}",
+        })
+
+    try:
+        region_id = ids.next(f"cal_region_{page_id}_{_esc(region_name)}")
+        chart_id  = ids.next(f"cal_chart_{page_id}_{_esc(region_name)}")
+        series_id = ids.next(f"cal_series_{page_id}_{_esc(region_name)}")
+
+        # ── 1. Create the region plug ─────────────────────────────────────────
+        auth_line = (
+            f",p_required_patch=>wwv_flow_imp.id_if_exists('{_esc(auth_scheme)}')"
+            if auth_scheme else ""
+        )
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--scrollBody'
+,p_escape_on_http_output=>'Y'
+,p_plug_template=>{REGION_TMPL_STANDARD}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source_type=>'NATIVE_JET_CHART'
+,p_plug_query_num_rows=>15
+{auth_line}
+);"""))
+
+        # ── 2. Create the JET chart config (calendar type) ────────────────────
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart(
+ p_id=>wwv_flow_imp.id({chart_id})
+,p_region_id=>wwv_flow_imp.id({region_id})
+,p_chart_type=>'calendar'
+,p_animation_on_display=>'auto'
+,p_animation_on_data_change=>'auto'
+,p_orientation=>'vertical'
+,p_data_cursor=>'auto'
+,p_hide_and_show_behavior=>'rescale'
+,p_initial_zooming=>'change'
+);"""))
+
+        # ── 3. Create the calendar series ─────────────────────────────────────
+        end_col_line = (
+            f"\n,p_items_end_date_column_name=>'{_esc(end_date_column.upper())}'"
+            if end_date_column else ""
+        )
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_jet_chart_series(
+ p_id=>wwv_flow_imp.id({series_id})
+,p_region_id=>wwv_flow_imp.id({region_id})
+,p_chart_id=>wwv_flow_imp.id({chart_id})
+,p_name=>'Events'
+,p_data_source_type=>'SQL'
+,p_location=>'LOCAL'
+,p_query_type=>'SQL'
+,p_series_query=>{_sql_to_varchar2(sql_query)}
+,p_items_value_column_name=>'{_esc(date_column.upper())}'
+,p_items_label_column_name=>'{_esc(title_column.upper())}'
+,p_series_type=>'auto'
+{end_col_line}
+);"""))
+
+        # Register in session
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id,
+            page_id=page_id,
+            region_name=region_name,
+            region_type="calendar",
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "region_name": region_name,
+            "region_id": region_id,
+            "chart_id": chart_id,
+            "display_as": view,
+            "date_column": date_column.upper(),
+            "title_column": title_column.upper(),
+            "end_date_column": end_date_column.upper() if end_date_column else None,
+            "message": f"Calendar '{region_name}' added to page {page_id}.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)

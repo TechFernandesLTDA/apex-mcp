@@ -12,11 +12,17 @@ class ConnectionManager:
     _instance: Optional["ConnectionManager"] = None
     _lock = threading.Lock()
 
+    # Column cache persists across reconnects (class-level, not instance-level)
+    _col_cache: dict = {}
+    _col_cache_lock: threading.Lock = threading.Lock()
+
     def __init__(self):
         self._conn: Optional[oracledb.Connection] = None
         self._conn_lock = threading.Lock()
         self.dry_run: bool = False
         self._dry_run_log: list[str] = []
+        self.batch_mode: bool = False
+        self._batch_queue: list[tuple[str, dict | None]] = []  # (plsql_body, params)
 
     @classmethod
     def get(cls) -> "ConnectionManager":
@@ -100,9 +106,20 @@ class ConnectionManager:
         return log
 
     def plsql(self, body: str, params: dict | None = None) -> None:
-        """Execute a PL/SQL anonymous block and commit. In dry_run mode, only records the SQL."""
+        """Execute a PL/SQL anonymous block and commit.
+
+        Behaviour:
+        - dry_run=True  → records the SQL in _dry_run_log, does NOT execute.
+        - batch_mode=True → appends (body, params) to _batch_queue, does NOT execute.
+        - Normal → executes immediately and commits.
+
+        dry_run takes precedence over batch_mode.
+        """
         if self.dry_run:
             self._dry_run_log.append(body)
+            return
+        if self.batch_mode:
+            self._batch_queue.append((body, params))
             return
         c = self.conn
         cur = c.cursor()
@@ -153,6 +170,80 @@ begin
   wwv_flow_application_install.set_no_proxy_domains(null);
 end;
 """)
+
+    def column_exists(self, view_name: str, column_name: str) -> bool:
+        """Check if a column exists in a data dictionary view (cached)."""
+        vn = view_name.upper()
+        cn = column_name.upper()
+        with self._col_cache_lock:
+            if vn not in self._col_cache:
+                try:
+                    rows = self.execute(
+                        "SELECT column_name FROM all_tab_columns "
+                        "WHERE table_name = :v ORDER BY column_id",
+                        {"v": vn}
+                    )
+                    self._col_cache[vn] = {r["COLUMN_NAME"] for r in rows}
+                except Exception:
+                    return True  # fail open -- don't block on cache miss
+            return cn in self._col_cache.get(vn, set())
+
+    def safe_col(self, view_name: str, column_name: str, fallback: str = "NULL") -> str:
+        """Return column_name if it exists in the view, else fallback expression."""
+        return column_name if self.column_exists(view_name, column_name) else fallback
+
+    def clear_col_cache(self) -> None:
+        """Clear the column cache (useful after APEX upgrades)."""
+        with self._col_cache_lock:
+            self._col_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Batch mode
+    # ------------------------------------------------------------------
+
+    def begin_batch(self) -> None:
+        """Start batch mode: plsql() calls are queued instead of executed.
+
+        Dry-run mode takes precedence — if dry_run is active, plsql() still
+        logs to _dry_run_log rather than _batch_queue.
+        """
+        self.batch_mode = True
+        self._batch_queue = []
+
+    def commit_batch(self) -> list[str]:
+        """Execute all queued PL/SQL blocks in a single connection round-trip and commit.
+
+        Each statement is executed in order. Errors on individual statements are
+        captured and reported in the returned log but do not abort the remaining
+        queue. A single COMMIT is issued after all statements are attempted.
+
+        Returns:
+            List of per-statement result strings: "OK: <first 60 chars>..." or
+            "ERR: <exception> — <first 60 chars>...".
+        """
+        self.batch_mode = False
+        if not self._batch_queue:
+            return []
+        log: list[str] = []
+        c = self.conn
+        cur = c.cursor()
+        try:
+            for body, params in self._batch_queue:
+                try:
+                    cur.execute(body, params or {})
+                    log.append(f"OK: {body[:60]}...")
+                except Exception as e:
+                    log.append(f"ERR: {e} — {body[:60]}...")
+            c.commit()
+        finally:
+            cur.close()
+            self._batch_queue = []
+        return log
+
+    def rollback_batch(self) -> None:
+        """Discard all queued batch operations without executing them."""
+        self.batch_mode = False
+        self._batch_queue = []
 
     def is_connected(self) -> bool:
         if self._conn is None:

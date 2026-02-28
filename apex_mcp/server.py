@@ -38,7 +38,7 @@ from .tools.shared_tools import (
     apex_add_app_item,
     apex_add_app_process,
 )
-from .tools.schema_tools import apex_list_tables, apex_describe_table
+from .tools.schema_tools import apex_list_tables, apex_describe_table, apex_detect_relationships
 from .tools.generator_tools import (
     apex_generate_crud,
     apex_generate_dashboard,
@@ -79,7 +79,15 @@ from .tools.visual_tools import (
     apex_add_funnel,
     apex_add_sparkline,
     apex_add_metric_cards,
+    apex_add_calendar,
     apex_generate_analytics_page,
+)
+from .tools.devops_tools import (
+    apex_generate_rest_endpoints,
+    apex_export_page,
+    apex_generate_docs,
+    apex_begin_batch,
+    apex_commit_batch,
 )
 from .tools.advanced_tools import (
     apex_generate_report_page,
@@ -92,6 +100,13 @@ from .tools.advanced_tools import (
     apex_preview_page,
     apex_add_search_bar,
     apex_generate_from_schema,
+    apex_generate_modal_form,
+    apex_add_master_detail,
+    apex_add_timeline,
+    apex_add_breadcrumb,
+    apex_add_faceted_search,
+    apex_add_chart_drilldown,
+    apex_add_file_upload,
 )
 
 # ── Server definition ─────────────────────────────────────────────────────────
@@ -210,6 +225,63 @@ apex_dry_run_preview(enabled=True)
 apex_dry_run_preview(enabled=False)  -- returns PL/SQL log
 ```
 
+## New UX Components
+```
+# Modal popup form (no separate page):
+apex_generate_modal_form(page_id=10, region_name="Edit Order", table_name="ORDERS", pk_item_name="ID")
+
+# Master-detail (two IRs, detail filtered by master selection):
+apex_add_master_detail(page_id=20, master_region_name="Clinics", master_sql="SELECT * FROM TEA_CLINICAS",
+    detail_region_name="Therapists", detail_sql="SELECT * FROM TEA_TERAPEUTAS WHERE ID_CLINICA = :P20_SELECTED_ID",
+    link_column="ID_CLINICA", page_item_name="SELECTED_ID")
+
+# Timeline (audit trail, history):
+apex_add_timeline(page_id=5, region_name="History", sql_query="SELECT DT, TITLE, BODY FROM LOG ORDER BY DT DESC",
+    date_col="DT", title_col="TITLE", body_col="BODY")
+
+# Calendar (DATE column):
+apex_add_calendar(page_id=5, region_name="Schedule",
+    sql_query="SELECT DT_AGENDADO, DS_OBSERVACAO FROM TEA_AVALIACOES",
+    date_column="DT_AGENDADO", title_column="DS_OBSERVACAO", display_as="month")
+
+# Faceted search (filter sidebar + IR):
+apex_add_faceted_search(page_id=10, region_name="Patients",
+    sql_query="SELECT * FROM TEA_BENEFICIARIOS",
+    facets=[{"column":"DS_SEXO","label":"Gender"},{"column":"ID_CLINICA","label":"Clinic"}])
+
+# Chart drilldown (click chart → filter IR):
+apex_add_chart_drilldown(page_id=5, chart_region_name="By Status",
+    target_item_name="FILTER_STATUS", filter_column="STATUS", target_region_name="Records List")
+
+# File upload (BLOB storage):
+apex_add_file_upload(page_id=11, region_name="Documents", item_name="ATTACHMENT",
+    table_name="DOCUMENTS", pk_item="P11_ID", blob_col="CONTENT",
+    filename_col="FILENAME", mimetype_col="MIME_TYPE")
+```
+
+## DevOps Tools
+```
+# ORDS REST endpoints for a table:
+apex_generate_rest_endpoints("ORDERS", base_path="orders", require_auth=True)
+# → GET/POST /ords/schema/orders/   GET/PUT/DELETE /ords/schema/orders/:id
+
+# Export a single page as SQL:
+apex_export_page(app_id=200, page_id=10, output_path="C:/exports/p10.sql")
+
+# Auto-generate Markdown docs for an app:
+apex_generate_docs(app_id=200)  -- returns full Markdown
+
+# Batch mode (queue operations, 1 DB round-trip):
+apex_begin_batch()
+apex_add_region(...)
+apex_add_item(...)
+apex_add_button(...)
+apex_commit_batch()  -- executes all at once
+
+# Detect FK relationships between tables:
+apex_detect_relationships(["ORDERS","CUSTOMERS","PRODUCTS"])
+```
+
 ## Key Conventions (APEX Best Practices)
 - Item names: P{page_id}_{COLUMN_NAME} (auto-applied)
 - AJAX callbacks: UPPERCASE names
@@ -265,6 +337,7 @@ mcp.tool()(apex_add_app_process)
 # Schema introspection
 mcp.tool()(apex_list_tables)
 mcp.tool()(apex_describe_table)
+mcp.tool()(apex_detect_relationships)
 
 # Generators (high-level)
 mcp.tool()(apex_generate_crud)
@@ -300,12 +373,13 @@ mcp.tool()(apex_diff_app)
 mcp.tool()(apex_add_item_validation)
 mcp.tool()(apex_add_item_computation)
 
-# Visual tools (JET charts + metric cards + gauges + sparklines)
+# Visual tools (JET charts + metric cards + gauges + sparklines + calendar)
 mcp.tool()(apex_add_jet_chart)
 mcp.tool()(apex_add_gauge)
 mcp.tool()(apex_add_funnel)
 mcp.tool()(apex_add_sparkline)
 mcp.tool()(apex_add_metric_cards)
+mcp.tool()(apex_add_calendar)
 mcp.tool()(apex_generate_analytics_page)
 
 # Advanced generators & utilities
@@ -319,6 +393,22 @@ mcp.tool()(apex_validate_app)
 mcp.tool()(apex_preview_page)
 mcp.tool()(apex_add_search_bar)
 mcp.tool()(apex_generate_from_schema)
+
+# Component tools — modal, master-detail, timeline, breadcrumb, faceted search, drilldown, file upload
+mcp.tool()(apex_generate_modal_form)
+mcp.tool()(apex_add_master_detail)
+mcp.tool()(apex_add_timeline)
+mcp.tool()(apex_add_breadcrumb)
+mcp.tool()(apex_add_faceted_search)
+mcp.tool()(apex_add_chart_drilldown)
+mcp.tool()(apex_add_file_upload)
+
+# DevOps — REST endpoints, page export, docs, batch mode
+mcp.tool()(apex_generate_rest_endpoints)
+mcp.tool()(apex_export_page)
+mcp.tool()(apex_generate_docs)
+mcp.tool()(apex_begin_batch)
+mcp.tool()(apex_commit_batch)
 
 
 def main():

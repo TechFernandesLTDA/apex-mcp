@@ -41,6 +41,60 @@ def _humanize(name: str) -> str:
     return name.replace("_", " ").title()
 
 
+def _col_to_item_type(col_info: dict) -> dict:
+    """Map an Oracle column descriptor to an APEX item-type descriptor dict.
+
+    ``col_info`` is expected to have the same keys returned by
+    ``user_tab_columns``: COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE.
+
+    Returns a dict with at minimum:
+        {
+            "type": "<APEX item type constant>",   # e.g. ITEM_TEXT
+            "skip": False,                         # True only for BLOB
+        }
+
+    Additional keys when applicable:
+        "height"   (int)  — for TEXTAREA items
+        "lov_name" (str)  — for YES_NO switch items
+
+    Mapping rules (evaluated in order):
+      1. DATA_TYPE = 'BLOB'               -> skip=True  (not renderable as form item)
+      2. DATA_TYPE in DATE/TIMESTAMP*     -> type: DATE_PICKER
+      3. DATA_TYPE in NUMBER/FLOAT/INT*   -> type: NUMBER_FIELD
+      4. DATA_TYPE in CLOB/LONG           -> type: TEXTAREA, height=4
+      5. DATA_TYPE CHAR(1)/VARCHAR2(1) AND column name matches FL_* pattern
+                                          -> type: YES_NO, lov_name='YES_NO'
+      6. everything else                  -> type: TEXT_FIELD
+    """
+    col_name  = col_info.get("COLUMN_NAME", "")
+    data_type = (col_info.get("DATA_TYPE") or "").upper()
+    data_length = col_info.get("DATA_LENGTH") or 0
+    upper = col_name.upper()
+
+    # Rule 1: BLOB — skip entirely
+    if data_type == "BLOB":
+        return {"type": ITEM_TEXT, "skip": True, "note": f"Column {col_name} (BLOB) omitted from form."}
+
+    # Rule 2: DATE / TIMESTAMP
+    if data_type == "DATE" or data_type.startswith("TIMESTAMP"):
+        return {"type": ITEM_DATE, "skip": False}
+
+    # Rule 3: Numeric types
+    if data_type in ("NUMBER", "FLOAT", "INTEGER", "INT", "SMALLINT", "NUMERIC", "DECIMAL", "BINARY_FLOAT", "BINARY_DOUBLE"):
+        return {"type": ITEM_NUMBER, "skip": False}
+
+    # Rule 4: CLOB / LONG
+    if data_type in ("CLOB", "LONG", "NCLOB"):
+        return {"type": ITEM_TEXTAREA, "skip": False, "height": 4}
+
+    # Rule 5: Single-char column with FL_ prefix → YES/NO switch
+    if upper.startswith("FL_") and data_type in ("CHAR", "VARCHAR2") and data_length <= 1:
+        return {"type": ITEM_YES_NO, "skip": False, "lov_name": "YES_NO"}
+
+    # Rule 6: default
+    return {"type": ITEM_TEXT, "skip": False}
+
+
 def _infer_item_type(
     col_name: str,
     data_type: str,
@@ -436,20 +490,31 @@ wwv_flow_imp_page.create_page_plug(
 
         # ── 12. Page items for each column ────────────────────────────────
         item_seq = 10
+        skipped_blobs: list[str] = []
         for col in cols:
             col_name = col["COLUMN_NAME"]
             # Skip audit columns
             if col_name.upper() in _AUDIT_COLUMNS:
                 continue
 
+            # Determine item type — PK/FK take priority, then _col_to_item_type
+            if col_name.upper() in pk_columns:
+                item_type = ITEM_HIDDEN
+                col_descriptor = {"type": ITEM_HIDDEN, "skip": False}
+            elif col_name.upper() in fk_columns:
+                item_type = ITEM_SELECT
+                col_descriptor = {"type": ITEM_SELECT, "skip": False}
+            else:
+                col_descriptor = _col_to_item_type(col)
+                item_type = col_descriptor["type"]
+
+            # Skip BLOB columns — record a note and move on
+            if col_descriptor.get("skip"):
+                skipped_blobs.append(col_name)
+                log.append(col_descriptor.get("note", f"Column {col_name} skipped."))
+                continue
+
             item_name = f"P{form_page_id}_{col_name.upper()}"
-            item_type = _infer_item_type(
-                col_name=col_name,
-                data_type=col["DATA_TYPE"],
-                data_length=col["DATA_LENGTH"],
-                pk_columns=pk_columns,
-                fk_columns=fk_columns,
-            )
             label = _humanize(col_name)
             is_required = col["NULLABLE"] == "N" and col_name.upper() not in pk_columns
             label_tmpl = LABEL_REQUIRED if is_required else LABEL_OPTIONAL
@@ -459,6 +524,12 @@ wwv_flow_imp_page.create_page_plug(
             lov_clause = ""
             if item_type == ITEM_SELECT and col_name.upper() in lov_ids:
                 lov_clause = f",p_lov=>wwv_flow_imp.id({lov_ids[col_name.upper()]})\n,p_lov_display_null=>'YES'\n,p_lov_null_text=>'-Select-'"
+
+            # Extra attributes for TEXTAREA (height hint)
+            extra_attrs = ""
+            if item_type == ITEM_TEXTAREA:
+                height = col_descriptor.get("height", 4)
+                extra_attrs = f",p_display_height=>{height}"
 
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
@@ -473,7 +544,7 @@ wwv_flow_imp_page.create_page_item(
 ,p_label_alignment=>'RIGHT'
 ,p_field_template=>{label_tmpl}
 ,p_item_template_options=>'#DEFAULT#'
-{lov_clause}
+{lov_clause}{extra_attrs}
 );"""))
             session.items[item_name] = ItemInfo(
                 item_id=item_id,
@@ -644,6 +715,7 @@ wwv_flow_imp_page.create_page_da_event(
                 "fk_columns": list(fk_columns),
                 "items_on_form": len(items_created),
                 "lovs": len(lovs_created),
+                "skipped_blobs": skipped_blobs,
             },
             "log": log,
         }, ensure_ascii=False, indent=2)

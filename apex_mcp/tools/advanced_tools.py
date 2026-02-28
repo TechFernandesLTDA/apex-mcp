@@ -1203,7 +1203,76 @@ def apex_generate_from_schema(
             all_pages.append(dash_page_id)
             apex_add_nav_item("Dashboard", dash_page_id, 5, "fa-home")
 
-        # CRUDs
+        # ── Pre-introspect FK relationships for all tables ────────────────
+        # Build a map: table -> list of {col, ref_table, ref_col, ref_display_col}
+        # This surfaces FK info in the top-level log so callers can see what
+        # LOVs will be auto-created, without duplicating the actual LOV creation
+        # (apex_generate_crud already handles that internally).
+        fk_summary: dict[str, list[dict]] = {}
+        upper_tables = [t.upper() for t in tables]
+        for tbl in upper_tables:
+            try:
+                fk_rows = db.execute("""
+                    SELECT cc.column_name,
+                           rc.table_name AS ref_table,
+                           rcc.column_name AS ref_column
+                      FROM user_constraints c
+                      JOIN user_cons_columns cc
+                        ON cc.constraint_name = c.constraint_name
+                      JOIN user_constraints rc
+                        ON rc.constraint_name = c.r_constraint_name
+                      JOIN user_cons_columns rcc
+                        ON rcc.constraint_name = rc.constraint_name
+                     WHERE c.table_name = :tname
+                       AND c.constraint_type = 'R'
+                     ORDER BY cc.position
+                """, {"tname": tbl})
+
+                if fk_rows:
+                    fk_summary[tbl] = []
+                    for fk in fk_rows:
+                        ref_table = fk["REF_TABLE"]
+                        ref_col   = fk["REF_COLUMN"]
+                        fk_col    = fk["COLUMN_NAME"]
+
+                        # Find best display column for the referenced table
+                        display_candidates = db.execute("""
+                            SELECT column_name FROM user_tab_columns
+                             WHERE table_name = :tname
+                               AND (column_name LIKE 'DS_%'
+                                    OR column_name LIKE '%NAME%'
+                                    OR column_name LIKE '%NOME%'
+                                    OR column_name LIKE '%DESCR%')
+                               AND column_name != :refcol
+                             ORDER BY column_id
+                        """, {"tname": ref_table, "refcol": ref_col})
+
+                        display_col = (
+                            display_candidates[0]["COLUMN_NAME"]
+                            if display_candidates else ref_col
+                        )
+
+                        fk_summary[tbl].append({
+                            "fk_column":    fk_col,
+                            "ref_table":    ref_table,
+                            "ref_column":   ref_col,
+                            "display_col":  display_col,
+                            "lov_sql":      f"SELECT {display_col} AS d, {ref_col} AS r FROM {ref_table} ORDER BY 1",
+                        })
+
+                    log.append(
+                        f"FK scan {tbl}: "
+                        + ", ".join(
+                            f"{e['fk_column']} -> {e['ref_table']}.{e['ref_column']} "
+                            f"(LOV display: {e['display_col']})"
+                            for e in fk_summary[tbl]
+                        )
+                    )
+            except Exception as fk_exc:
+                log.append(f"FK scan {tbl}: skipped ({fk_exc})")
+
+        # CRUDs — apex_generate_crud already introspects PKs/FKs and creates
+        # LOVs for FK columns automatically; the pre-scan above enriches logging.
         for i, table in enumerate(tables):
             list_pg = page_cursor
             form_pg = page_cursor + 1
@@ -1214,7 +1283,15 @@ def apex_generate_from_schema(
                 items_n = len(r.get("items_created", []))
                 total_items += items_n
                 all_pages.extend([list_pg, form_pg])
-                log.append(f"CRUD for {table.upper()}: pages {list_pg}/{form_pg}, {items_n} items")
+                fk_cols = r.get("summary", {}).get("fk_columns", [])
+                lovs_n  = r.get("summary", {}).get("lovs", 0)
+                skipped = r.get("summary", {}).get("skipped_blobs", [])
+                detail  = f"pages {list_pg}/{list_pg+1}, {items_n} items"
+                if fk_cols:
+                    detail += f", FK LOVs: {fk_cols} ({lovs_n} created)"
+                if skipped:
+                    detail += f", BLOBs skipped: {skipped}"
+                log.append(f"CRUD for {table.upper()}: {detail}")
 
                 # Nav item
                 nav_label = table.replace("_", " ").title()
@@ -1229,9 +1306,1233 @@ def apex_generate_from_schema(
             "pages_created": all_pages,
             "total_items": total_items,
             "total_pages": len(all_pages),
+            "fk_summary": fk_summary,
             "message": f"Generated app from {len(tables)} tables: {len(all_pages)} pages, {total_items} items.",
             "log": log,
         }, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_generate_modal_form
+# ---------------------------------------------------------------------------
+
+def apex_generate_modal_form(
+    page_id: int,
+    region_name: str,
+    table_name: str,
+    pk_item_name: str,
+    title: str = "",
+    sequence: int = 10,
+    auth_scheme: str = "",
+) -> str:
+    """Create an inline dialog (modal popup) form region on a page — no separate page needed.
+
+    Renders an HTML dialog container using APEX Universal Theme CSS classes
+    (``t-DialogRegion``) via a NATIVE_PLSQL region positioned in AFTER_FOOTER.
+    A hidden PK item and Save/Close buttons are included. To open the dialog,
+    trigger it from a button with action ``DEFINED_BY_DA`` and add a Dynamic
+    Action that executes:
+        ``apex.region('<static_id>').show();``
+    where ``<static_id>`` is the ``region_static_id`` value returned here.
+
+    Args:
+        page_id: Page ID where the modal lives.
+        region_name: Display name of the modal region.
+        table_name: Table the modal form targets (used for the Save process).
+        pk_item_name: Page item name for the primary key
+            (auto-prefixed with ``P{page_id}_`` if needed).
+        title: Modal title text shown in the dialog header.
+            Defaults to ``region_name``.
+        sequence: Display sequence for the region (default 10).
+        auth_scheme: Optional authorization scheme name.
+
+    Returns:
+        JSON with status, region_id, static_id, pk_item, and created list.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+
+    modal_title = title or region_name
+    # Derive a safe static_id from region_name (lowercase, underscores, no spaces)
+    static_id = "modal_" + region_name.lower().replace(" ", "_").replace("-", "_")
+    # Ensure pk_item_name has correct prefix
+    full_pk_item = f"P{page_id}_{pk_item_name.upper()}" if not pk_item_name.upper().startswith(f"P{page_id}_") else pk_item_name.upper()
+    created: list[str] = []
+
+    try:
+        # ── Dialog container region (NATIVE_PLSQL, placed AFTER_FOOTER) ──────
+        region_id = ids.next(f"modal_region_{page_id}_{_esc(region_name)}")
+
+        # PL/SQL body renders the t-DialogRegion shell; items live inside via APEX rendering
+        dialog_plsql = (
+            f"BEGIN\n"
+            f"  sys.htp.p('<div class=\"t-DialogRegion APEX_50_MODAL js-regionDialog\" "
+            f"id=\"{static_id}\" "
+            f"data-dialog-title=\"{_esc(modal_title)}\" "
+            f"data-dialog-max-width=\"600\" "
+            f"style=\"display:none;\">');\n"
+            f"  sys.htp.p('<div class=\"t-DialogRegion-header\">');\n"
+            f"  sys.htp.p('<span class=\"t-DialogRegion-title\">{_esc(modal_title)}</span>');\n"
+            f"  sys.htp.p('</div>');\n"
+            f"  sys.htp.p('<div class=\"t-DialogRegion-body\" id=\"{static_id}_body\">');\n"
+            f"  sys.htp.p('<!-- Modal form items are rendered here by APEX -->');\n"
+            f"  sys.htp.p('</div>');\n"
+            f"  sys.htp.p('<div class=\"t-DialogRegion-buttons\">');\n"
+            f"  sys.htp.p('<button type=\"button\" class=\"t-Button t-Button--hot\" "
+            f"onclick=\"apex.submit(''SAVE_MODAL'');\">{_esc(modal_title)} — Save</button>');\n"
+            f"  sys.htp.p('<button type=\"button\" class=\"t-Button\" "
+            f"onclick=\"apex.region(''{static_id}'').hide();\">Close</button>');\n"
+            f"  sys.htp.p('</div>');\n"
+            f"  sys.htp.p('</div>');\n"
+            f"END;"
+        )
+
+        auth_line = f"\n,p_plug_required_role=>'{_esc(auth_scheme)}'" if auth_scheme else ""
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--noPadding:t-Region--hideHeader'
+,p_plug_template=>{REGION_TMPL_BLANK}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'AFTER_FOOTER'
+,p_plug_source=>'{_esc(dialog_plsql)}'
+,p_plug_source_type=>'NATIVE_PLSQL'
+,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
+,p_plug_tag_attributes=>'id="{static_id}"'{auth_line}
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id,
+            page_id=page_id,
+            region_name=region_name,
+            region_type="modal",
+        )
+        created.append(f"region:{region_name}")
+
+        # ── Hidden PK item inside the modal region ────────────────────────────
+        pk_item_id = ids.next(f"item_{page_id}_{full_pk_item.lower()}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_item(
+ p_id=>wwv_flow_imp.id({pk_item_id})
+,p_name=>'{_esc(full_pk_item)}'
+,p_item_sequence=>10
+,p_item_plug_id=>wwv_flow_imp.id({region_id})
+,p_display_as=>'{ITEM_HIDDEN}'
+,p_label_alignment=>'RIGHT'
+,p_field_template=>{LABEL_OPTIONAL}
+,p_item_template_options=>'#DEFAULT#'
+);"""))
+        session.items[full_pk_item] = ItemInfo(
+            item_id=pk_item_id,
+            page_id=page_id,
+            item_name=full_pk_item,
+            item_type="hidden",
+        )
+        created.append(f"item:{full_pk_item}")
+
+        # ── After-submit process: MERGE into table ────────────────────────────
+        save_proc_id = ids.next(f"proc_modal_save_{page_id}_{_esc(region_name)}")
+        upper_table = table_name.upper()
+        save_plsql = (
+            f"BEGIN\n"
+            f"  IF :{full_pk_item} IS NULL THEN\n"
+            f"    INSERT INTO {upper_table} (ID)\n"
+            f"    VALUES (sys_guid())\n"
+            f"    RETURNING ID INTO :{full_pk_item};\n"
+            f"  END IF;\n"
+            f"  -- TODO: add column-level UPDATEs for your form items here\n"
+            f"  COMMIT;\n"
+            f"END;"
+        )
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_process(
+ p_id=>wwv_flow_imp.id({save_proc_id})
+,p_process_sequence=>{sequence}
+,p_process_point=>'AFTER_SUBMIT'
+,p_process_type=>'{PROC_PLSQL}'
+,p_process_name=>'Save Modal {_esc(region_name)}'
+,p_process_sql_clob=>{_sql_to_varchar2(save_plsql)}
+,p_process_clob_language=>'PLSQL'
+,p_error_display_location=>'INLINE_IN_NOTIFICATION'
+,p_process_when=>'SAVE_MODAL'
+,p_process_when_type=>'REQUEST_EQUALS_CONDITION'
+,p_success_message=>'Record saved successfully.'
+);"""))
+        session.app_processes.append(f"Save Modal {region_name}")
+        created.append(f"process:Save Modal {region_name}")
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "region_id": region_id,
+            "region_name": region_name,
+            "region_static_id": static_id,
+            "table_name": upper_table,
+            "pk_item": full_pk_item,
+            "created": created,
+            "open_js": f"apex.region('{static_id}').show();",
+            "message": (
+                f"Modal form '{region_name}' created on page {page_id}. "
+                f"Open it with: apex.region('{static_id}').show();"
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_master_detail
+# ---------------------------------------------------------------------------
+
+def apex_add_master_detail(
+    page_id: int,
+    master_region_name: str,
+    master_sql: str,
+    detail_region_name: str,
+    detail_sql: str,
+    link_column: str,
+    page_item_name: str,
+    sequence: int = 10,
+) -> str:
+    """Create a master Interactive Report + detail Interactive Report on the same page.
+
+    Selecting a row in the master IR sets a hidden page item and refreshes the
+    detail IR, which should contain ``:P{page_id}_{page_item_name}`` as a bind
+    variable in its WHERE clause.
+
+    Args:
+        page_id: Page ID where both regions will live.
+        master_region_name: Display name of the master IR region.
+        master_sql: SQL query for the master IR.
+            Example: ``"SELECT ID, DS_NOME FROM TEA_CLINICAS ORDER BY DS_NOME"``
+        detail_region_name: Display name of the detail IR region.
+        detail_sql: SQL query for the detail IR. Must reference the hidden item
+            as a bind variable.
+            Example:
+            ``"SELECT * FROM TEA_BENEFICIARIOS WHERE ID_CLINICA = :P10_SELECTED_ID"``
+        link_column: Column in the master IR whose value is passed to the hidden
+            item when a row is clicked (e.g., ``"ID"``).
+        page_item_name: Suffix for the hidden item name — auto-prefixed with
+            ``P{page_id}_``.  The bind variable in ``detail_sql`` must match.
+        sequence: Display sequence for the master region (detail gets +10).
+
+    Returns:
+        JSON with status, region IDs, hidden item name, and DA ID.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+
+    full_item_name = (
+        f"P{page_id}_{page_item_name.upper()}"
+        if not page_item_name.upper().startswith(f"P{page_id}_")
+        else page_item_name.upper()
+    )
+    created: list[str] = []
+
+    try:
+        # ── Master IR region ──────────────────────────────────────────────────
+        master_region_id = ids.next(f"master_region_{page_id}_{_esc(master_region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({master_region_id})
+,p_plug_name=>'{_esc(master_region_name)}'
+,p_region_template_options=>'#DEFAULT#'
+,p_plug_template=>{REGION_TMPL_IR}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_query_type=>'SQL'
+,p_plug_source=>'{_esc(master_sql)}'
+,p_plug_source_type=>'NATIVE_IR'
+);"""))
+        session.regions[master_region_id] = RegionInfo(
+            region_id=master_region_id, page_id=page_id,
+            region_name=master_region_name, region_type="NATIVE_IR",
+        )
+        created.append(f"region:{master_region_name}")
+
+        # Worksheet for master
+        master_ws_id = ids.next(f"master_ws_{page_id}_{_esc(master_region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_worksheet(
+ p_id=>wwv_flow_imp.id({master_ws_id})
+,p_region_id=>wwv_flow_imp.id({master_region_id})
+,p_max_row_count=>'1000000'
+,p_no_data_found_message=>'No data found.'
+,p_pagination_type=>'ROWS_X_TO_Y'
+,p_pagination_display_pos=>'BOTTOM_RIGHT'
+,p_report_list_mode=>'TABS'
+,p_lazy_loading=>false
+,p_show_detail_link=>'N'
+,p_show_search_bar=>'Y'
+,p_show_actions_menu=>'Y'
+,p_show_select_columns=>'Y'
+,p_show_filter=>'Y'
+,p_show_sort=>'Y'
+,p_show_download=>'Y'
+,p_download_formats=>'CSV:HTML:XLSX'
+,p_enable_mail_download=>'Y'
+,p_version_scn=>1
+);"""))
+
+        # ── Hidden item to store the selected master PK ───────────────────────
+        hidden_item_id = ids.next(f"item_{page_id}_{full_item_name.lower()}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_item(
+ p_id=>wwv_flow_imp.id({hidden_item_id})
+,p_name=>'{_esc(full_item_name)}'
+,p_item_sequence=>10
+,p_item_plug_id=>wwv_flow_imp.id({master_region_id})
+,p_display_as=>'{ITEM_HIDDEN}'
+,p_label_alignment=>'RIGHT'
+,p_field_template=>{LABEL_OPTIONAL}
+,p_item_template_options=>'#DEFAULT#'
+);"""))
+        session.items[full_item_name] = ItemInfo(
+            item_id=hidden_item_id, page_id=page_id,
+            item_name=full_item_name, item_type="hidden",
+        )
+        created.append(f"item:{full_item_name}")
+
+        # ── Detail IR region ──────────────────────────────────────────────────
+        detail_region_id = ids.next(f"detail_region_{page_id}_{_esc(detail_region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({detail_region_id})
+,p_plug_name=>'{_esc(detail_region_name)}'
+,p_region_template_options=>'#DEFAULT#'
+,p_plug_template=>{REGION_TMPL_IR}
+,p_plug_display_sequence=>{sequence + 10}
+,p_plug_display_point=>'BODY'
+,p_query_type=>'SQL'
+,p_plug_source=>'{_esc(detail_sql)}'
+,p_plug_source_type=>'NATIVE_IR'
+);"""))
+        session.regions[detail_region_id] = RegionInfo(
+            region_id=detail_region_id, page_id=page_id,
+            region_name=detail_region_name, region_type="NATIVE_IR",
+        )
+        created.append(f"region:{detail_region_name}")
+
+        # Worksheet for detail
+        detail_ws_id = ids.next(f"detail_ws_{page_id}_{_esc(detail_region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_worksheet(
+ p_id=>wwv_flow_imp.id({detail_ws_id})
+,p_region_id=>wwv_flow_imp.id({detail_region_id})
+,p_max_row_count=>'1000000'
+,p_no_data_found_message=>'Select a row above to see details.'
+,p_pagination_type=>'ROWS_X_TO_Y'
+,p_pagination_display_pos=>'BOTTOM_RIGHT'
+,p_report_list_mode=>'TABS'
+,p_lazy_loading=>false
+,p_show_detail_link=>'N'
+,p_show_search_bar=>'Y'
+,p_show_actions_menu=>'Y'
+,p_show_select_columns=>'Y'
+,p_show_filter=>'Y'
+,p_show_sort=>'Y'
+,p_show_download=>'Y'
+,p_download_formats=>'CSV:HTML:XLSX'
+,p_enable_mail_download=>'Y'
+,p_version_scn=>1
+);"""))
+
+        # ── Dynamic Action: master IR row click -> set item + refresh detail ──
+        da_id = ids.next(f"da_master_detail_{page_id}_{_esc(master_region_name)}")
+        da_set_act_id = ids.next(f"da_act_set_{page_id}")
+        da_refresh_act_id = ids.next(f"da_act_refresh_{page_id}")
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_event(
+ p_id=>wwv_flow_imp.id({da_id})
+,p_name=>'Master Row Click - {_esc(master_region_name)}'
+,p_event_sequence=>{sequence}
+,p_triggering_element_type=>'REGION'
+,p_triggering_region_id=>wwv_flow_imp.id({master_region_id})
+,p_bind_type=>'bind'
+,p_execution_type=>'IMMEDIATE'
+,p_bind_event_type=>'apexafterclosedialog'
+);"""))
+
+        # Action 1: set hidden item from clicked row column
+        set_js = (
+            f"var col = this.data ? this.data.model.getValue(this.data.record, "
+            f"'{link_column.upper()}') : '';"
+            f"apex.item('{full_item_name}').setValue(col);"
+        )
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_set_act_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'TRUE'
+,p_action_sequence=>10
+,p_execute_on_page_init=>'N'
+,p_action=>'NATIVE_JAVASCRIPT_CODE'
+,p_attribute_01=>'{_esc(set_js)}'
+);"""))
+
+        # Action 2: refresh detail region
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_refresh_act_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'TRUE'
+,p_action_sequence=>20
+,p_execute_on_page_init=>'N'
+,p_action=>'NATIVE_REFRESH'
+,p_affected_elements_type=>'REGION'
+,p_affected_region_id=>wwv_flow_imp.id({detail_region_id})
+);"""))
+        created.append(f"da:Master Row Click - {master_region_name}")
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "master_region_id": master_region_id,
+            "master_region_name": master_region_name,
+            "detail_region_id": detail_region_id,
+            "detail_region_name": detail_region_name,
+            "hidden_item": full_item_name,
+            "link_column": link_column.upper(),
+            "da_id": da_id,
+            "created": created,
+            "message": (
+                f"Master-detail created on page {page_id}: "
+                f"'{master_region_name}' -> '{detail_region_name}' "
+                f"linked via {link_column.upper()} -> {full_item_name}."
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_timeline
+# ---------------------------------------------------------------------------
+
+def apex_add_timeline(
+    page_id: int,
+    region_name: str,
+    sql_query: str,
+    date_col: str,
+    title_col: str,
+    body_col: str,
+    icon_col: str = "",
+    sequence: int = 10,
+) -> str:
+    """Add a Timeline region that renders APEX Universal Theme timeline markup.
+
+    Creates a NATIVE_PLSQL region that opens a cursor over ``sql_query`` and
+    renders each row as a ``t-Timeline-item`` element using the APEX Universal
+    Theme CSS classes.  The output is a vertical timeline list.
+
+    Args:
+        page_id: Target page ID.
+        region_name: Display name of the timeline region.
+        sql_query: SQL SELECT that must return at least the columns specified
+            by ``date_col``, ``title_col``, and ``body_col`` (and optionally
+            ``icon_col``).  Example::
+
+                SELECT TO_CHAR(DT_AVALIACAO, 'DD/MM/YYYY') AS DT,
+                       DS_STATUS AS TITULO,
+                       DS_OBSERVACOES AS CORPO,
+                       'fa-star' AS ICONE
+                  FROM TEA_AVALIACOES
+                 WHERE ID_BENEFICIARIO = :P10_ID
+                 ORDER BY DT_AVALIACAO DESC
+
+        date_col: Column alias that provides the date/time label.
+        title_col: Column alias that provides the timeline item title.
+        body_col: Column alias that provides the timeline item body text.
+        icon_col: Column alias that provides a Font APEX icon class
+            (e.g., ``fa-circle``).  Defaults to ``fa-circle`` when omitted
+            or when the column is NULL.
+        sequence: Region display order on the page.
+
+    Returns:
+        JSON with status, region_id, and message.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+
+    # Escape column names for use in PL/SQL
+    dc = date_col.upper()
+    tc = title_col.upper()
+    bc = body_col.upper()
+    ic = icon_col.upper() if icon_col else ""
+
+    # Build the icon expression used inside the PL/SQL cursor loop
+    if ic:
+        icon_expr = f"NVL(r.{ic}, 'fa-circle')"
+    else:
+        icon_expr = "'fa-circle'"
+
+    plsql_body = (
+        f"DECLARE\n"
+        f"  CURSOR c IS {sql_query};\n"
+        f"  r c%ROWTYPE;\n"
+        f"BEGIN\n"
+        f"  sys.htp.p('<ul class=\"t-Timeline\">');\n"
+        f"  OPEN c;\n"
+        f"  LOOP\n"
+        f"    FETCH c INTO r;\n"
+        f"    EXIT WHEN c%NOTFOUND;\n"
+        f"    sys.htp.p('<li class=\"t-Timeline-item\">');\n"
+        f"    sys.htp.p('<div class=\"t-Timeline-wrap\">');\n"
+        f"    sys.htp.p('<div class=\"t-Timeline-info\">');\n"
+        f"    sys.htp.p('<span class=\"t-Timeline-date\">' || APEX_ESCAPE.HTML(TO_CHAR(r.{dc})) || '</span>');\n"
+        f"    sys.htp.p('</div>');\n"
+        f"    sys.htp.p('<div class=\"t-Timeline-content\">');\n"
+        f"    sys.htp.p('<div class=\"t-Timeline-typeWrap\">'||"
+        f"'<div class=\"t-Timeline-type\">'||"
+        f"'<span class=\"t-Icon fa '|| {icon_expr} ||'\"></span>'||"
+        f"'</div></div>');\n"
+        f"    sys.htp.p('<div class=\"t-Timeline-body\">');\n"
+        f"    sys.htp.p('<h3 class=\"t-Timeline-title\">' || APEX_ESCAPE.HTML(r.{tc}) || '</h3>');\n"
+        f"    sys.htp.p('<p>' || APEX_ESCAPE.HTML(r.{bc}) || '</p>');\n"
+        f"    sys.htp.p('</div>');\n"
+        f"    sys.htp.p('</div>');\n"
+        f"    sys.htp.p('</div>');\n"
+        f"    sys.htp.p('</li>');\n"
+        f"  END LOOP;\n"
+        f"  CLOSE c;\n"
+        f"  sys.htp.p('</ul>');\n"
+        f"END;"
+    )
+
+    try:
+        region_id = ids.next(f"timeline_region_{page_id}_{_esc(region_name)}")
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#'
+,p_plug_template=>{REGION_TMPL_STANDARD}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source=>'{_esc(plsql_body)}'
+,p_plug_source_type=>'NATIVE_PLSQL'
+,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id,
+            page_id=page_id,
+            region_name=region_name,
+            region_type="timeline",
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "region_id": region_id,
+            "region_name": region_name,
+            "columns": {
+                "date": dc,
+                "title": tc,
+                "body": bc,
+                "icon": ic or "(default fa-circle)",
+            },
+            "message": f"Timeline region '{region_name}' added to page {page_id}.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_breadcrumb
+# ---------------------------------------------------------------------------
+
+def apex_add_breadcrumb(
+    page_id: int,
+    region_name: str,
+    entries: list[dict],
+    sequence: int = 1,
+) -> str:
+    """Add a breadcrumb navigation region to a page using Universal Theme markup.
+
+    Creates a NATIVE_PLSQL region that renders a ``t-Breadcrumb`` navigation
+    element following APEX Universal Theme conventions.  Each entry can link
+    to another page or represent the current (active) page.
+
+    Args:
+        page_id: Page where the breadcrumb will appear.
+        region_name: Internal name for the breadcrumb region.
+        entries: Ordered list of breadcrumb items.  Each dict must have:
+            - ``"label"`` (str): The text shown for this breadcrumb step.
+            - ``"page_id"`` (int | None): Target APEX page ID.  Pass ``None``
+              (or omit) to mark this entry as the active/current page (no link).
+            Example::
+
+                [
+                    {"label": "Home",        "page_id": 1},
+                    {"label": "Beneficiarios","page_id": 10},
+                    {"label": "Detalhe",      "page_id": None},
+                ]
+
+        sequence: Display order of the breadcrumb region on the page
+            (default 1 — renders above other content).
+
+    Returns:
+        JSON with status, region_id, and the number of entries rendered.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+    if not entries:
+        return json.dumps({"status": "error", "error": "At least one breadcrumb entry is required."})
+
+    # Build the list items HTML string
+    li_parts: list[str] = []
+    for entry in entries:
+        label = _esc(entry.get("label", ""))
+        target_page = entry.get("page_id")
+        if target_page is not None:
+            # Linked entry
+            li_parts.append(
+                f'<li class="t-Breadcrumb-item">'
+                f'<a href="f?p=&APP_ID.:{target_page}:&SESSION.::&DEBUG.:::">'
+                f'{label}</a></li>'
+            )
+        else:
+            # Active (current) entry — no link
+            li_parts.append(
+                f'<li class="t-Breadcrumb-item is-active">'
+                f'<span>{label}</span></li>'
+            )
+
+    li_html = "".join(li_parts)
+
+    plsql_body = (
+        f"BEGIN\n"
+        f"  sys.htp.p('<nav aria-label=\"breadcrumb\" class=\"t-BreadcrumbRegion-body\">');\n"
+        f"  sys.htp.p('<ul class=\"t-Breadcrumb\">{li_html}</ul>');\n"
+        f"  sys.htp.p('</nav>');\n"
+        f"END;"
+    )
+
+    try:
+        region_id = ids.next(f"breadcrumb_region_{page_id}_{_esc(region_name)}")
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#:t-Region--noPadding:t-Region--hideHeader'
+,p_plug_template=>{REGION_TMPL_BLANK}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BREADCRUMB_BAR'
+,p_plug_source=>'{_esc(plsql_body)}'
+,p_plug_source_type=>'NATIVE_PLSQL'
+,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
+);"""))
+
+        session.regions[region_id] = RegionInfo(
+            region_id=region_id,
+            page_id=page_id,
+            region_name=region_name,
+            region_type="breadcrumb",
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "region_id": region_id,
+            "region_name": region_name,
+            "entries_count": len(entries),
+            "message": f"Breadcrumb region '{region_name}' with {len(entries)} entries added to page {page_id}.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_faceted_search
+# ---------------------------------------------------------------------------
+
+def apex_add_faceted_search(
+    page_id: int,
+    region_name: str,
+    sql_query: str,
+    facets: list[dict],
+    sequence: int = 10,
+) -> str:
+    """Add a faceted-search layout: filter SELECT_LISTs on the left + IR on the right.
+
+    Creates a two-column layout on the page:
+    1. A filter region with one SELECT_LIST item per facet, each defaulting to
+       "All" so the IR shows all rows when no filter is selected.
+    2. An Interactive Report region that uses the facet columns as bind variables
+       in its WHERE clause.
+    3. A Dynamic Action on each filter item that submits the page to re-render
+       the IR with the selected filter values applied.
+
+    The ``sql_query`` should contain bind-variable predicates for each facet
+    column.  Example::
+
+        SELECT * FROM TEA_AVALIACOES
+         WHERE (:P10_STATUS IS NULL OR DS_STATUS = :P10_STATUS)
+           AND (:P10_CLINICA IS NULL OR ID_CLINICA = :P10_CLINICA)
+
+    Args:
+        page_id: Target page ID.
+        region_name: Display name of the main IR region.
+        sql_query: SQL for the Interactive Report with ``:{item_name}`` bind
+            variables matching the facet items that will be created.
+        facets: List of facet descriptor dicts.  Each must have:
+            - ``"column"`` (str): Column name used in the bind variable and LOV.
+            - ``"label"`` (str): Label shown next to the filter.
+            - ``"type"`` (str): Filter widget type.  Currently ``"checkbox"``
+              and ``"select"`` both produce a SELECT_LIST (with All option).
+            - ``"lov"`` (str, optional): LOV SQL
+              ``"SELECT display d, return r FROM ..."`` — auto-generated from
+              ``DISTINCT column FROM table`` when omitted.
+            Example::
+
+                [
+                    {"column": "DS_STATUS", "label": "Status", "type": "select"},
+                    {"column": "ID_CLINICA", "label": "Clinica",
+                     "type": "select",
+                     "lov": "SELECT DS_NOME d, ID_CLINICA r FROM TEA_CLINICAS ORDER BY 1"},
+                ]
+
+        sequence: Display sequence for the filter region (IR gets +10).
+
+    Returns:
+        JSON with status, region IDs, filter items created, and DA IDs.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+    if not facets:
+        return json.dumps({"status": "error", "error": "At least one facet is required."})
+
+    created: list[str] = []
+
+    try:
+        # ── Filter region (left sidebar) ──────────────────────────────────────
+        filter_region_id = ids.next(f"facet_filter_{page_id}_{_esc(region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({filter_region_id})
+,p_plug_name=>'Filtros'
+,p_region_template_options=>'#DEFAULT#:t-Form--stretchInputs:t-Form--labelsAbove'
+,p_plug_template=>{REGION_TMPL_STANDARD}
+,p_plug_display_sequence=>{sequence}
+,p_plug_display_point=>'BODY'
+,p_plug_source_type=>'NATIVE_STATIC'
+,p_plug_column_width=>'300px'
+);"""))
+        session.regions[filter_region_id] = RegionInfo(
+            region_id=filter_region_id, page_id=page_id,
+            region_name="Filtros", region_type="filter",
+        )
+        created.append("region:Filtros")
+
+        # ── IR region (main content) ──────────────────────────────────────────
+        ir_region_id = ids.next(f"facet_ir_{page_id}_{_esc(region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({ir_region_id})
+,p_plug_name=>'{_esc(region_name)}'
+,p_region_template_options=>'#DEFAULT#'
+,p_plug_template=>{REGION_TMPL_IR}
+,p_plug_display_sequence=>{sequence + 10}
+,p_plug_display_point=>'BODY'
+,p_query_type=>'SQL'
+,p_plug_source=>'{_esc(sql_query)}'
+,p_plug_source_type=>'NATIVE_IR'
+);"""))
+        session.regions[ir_region_id] = RegionInfo(
+            region_id=ir_region_id, page_id=page_id,
+            region_name=region_name, region_type="NATIVE_IR",
+        )
+        created.append(f"region:{region_name}")
+
+        # IR worksheet
+        ws_id = ids.next(f"facet_ws_{page_id}_{_esc(region_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_worksheet(
+ p_id=>wwv_flow_imp.id({ws_id})
+,p_region_id=>wwv_flow_imp.id({ir_region_id})
+,p_max_row_count=>'1000000'
+,p_no_data_found_message=>'No data found.'
+,p_pagination_type=>'ROWS_X_TO_Y'
+,p_pagination_display_pos=>'BOTTOM_RIGHT'
+,p_report_list_mode=>'TABS'
+,p_lazy_loading=>false
+,p_show_detail_link=>'N'
+,p_show_search_bar=>'Y'
+,p_show_actions_menu=>'Y'
+,p_show_select_columns=>'Y'
+,p_show_filter=>'Y'
+,p_show_sort=>'Y'
+,p_show_download=>'Y'
+,p_download_formats=>'CSV:HTML:XLSX'
+,p_enable_mail_download=>'Y'
+,p_version_scn=>1
+);"""))
+
+        # ── Facet filter items + DAs ──────────────────────────────────────────
+        filter_items_created: list[str] = []
+        da_ids: list[int] = []
+
+        for seq_n, facet in enumerate(facets, start=1):
+            col = facet.get("column", f"COL{seq_n}").upper()
+            label = facet.get("label", col.replace("_", " ").title())
+            lov_sql = facet.get(
+                "lov",
+                f"SELECT DISTINCT {col} AS d, {col} AS r FROM ({sql_query.split('WHERE')[0].strip()}) ORDER BY 1"
+            )
+
+            item_name = f"P{page_id}_{col}"
+            item_id = ids.next(f"facet_item_{page_id}_{col.lower()}")
+
+            db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_item(
+ p_id=>wwv_flow_imp.id({item_id})
+,p_name=>'{_esc(item_name)}'
+,p_item_sequence=>{seq_n * 10}
+,p_item_plug_id=>wwv_flow_imp.id({filter_region_id})
+,p_prompt=>'{_esc(label)}'
+,p_display_as=>'{ITEM_SELECT}'
+,p_label_alignment=>'RIGHT'
+,p_field_template=>{LABEL_OPTIONAL}
+,p_item_template_options=>'#DEFAULT#'
+,p_lov=>'{_esc(lov_sql)}'
+,p_lov_display_null=>'YES'
+,p_lov_null_text=>'- All -'
+);"""))
+            session.items[item_name] = ItemInfo(
+                item_id=item_id, page_id=page_id,
+                item_name=item_name, item_type="select",
+            )
+            filter_items_created.append(item_name)
+            created.append(f"item:{item_name}")
+
+            # DA: on filter change -> submit page to refresh IR
+            da_id = ids.next(f"da_facet_{page_id}_{col.lower()}")
+            da_act_id = ids.next(f"da_facet_act_{page_id}_{col.lower()}")
+
+            db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_event(
+ p_id=>wwv_flow_imp.id({da_id})
+,p_name=>'Facet Filter {_esc(label)}'
+,p_event_sequence=>{seq_n * 10}
+,p_triggering_element_type=>'ITEM'
+,p_triggering_element=>'{_esc(item_name)}'
+,p_bind_type=>'bind'
+,p_execution_type=>'IMMEDIATE'
+,p_bind_event_type=>'change'
+);"""))
+
+            db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_act_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'TRUE'
+,p_action_sequence=>10
+,p_execute_on_page_init=>'N'
+,p_action=>'NATIVE_SUBMIT_PAGE'
+);"""))
+            da_ids.append(da_id)
+            created.append(f"da:Facet Filter {label}")
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "filter_region_id": filter_region_id,
+            "ir_region_id": ir_region_id,
+            "filter_items": filter_items_created,
+            "da_ids": da_ids,
+            "created": created,
+            "message": (
+                f"Faceted search created on page {page_id}: "
+                f"{len(filter_items_created)} filter(s) -> '{region_name}' IR."
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_chart_drilldown
+# ---------------------------------------------------------------------------
+
+def apex_add_chart_drilldown(
+    page_id: int,
+    chart_region_name: str,
+    target_item_name: str,
+    filter_column: str,
+    target_region_name: str,
+    sequence: int = 10,
+) -> str:
+    """Add a Dynamic Action that drills down from a JET Chart click into an IR region.
+
+    When the user clicks a chart series/bar/slice in ``chart_region_name``, the
+    DA:
+    1. Reads the clicked group label via ``this.data.groupLabel``.
+    2. Sets ``P{page_id}_{target_item_name}`` to that value.
+    3. Refreshes ``target_region_name`` (which should have a ``WHERE`` clause
+       that filters on the bound item).
+
+    Args:
+        page_id: Page ID.
+        chart_region_name: Name of the JET Chart region to listen on.
+            The region must already exist on the page (created with
+            ``apex_add_region(..., region_type="chart", ...)``.
+        target_item_name: Suffix for the hidden item that will store the clicked
+            label.  Auto-prefixed with ``P{page_id}_``.  Must match the bind
+            variable used in the detail IR SQL.
+        filter_column: The chart series/group column whose label is captured
+            (informational — used in the DA name for clarity).
+        target_region_name: Name of the IR/IG region to refresh after the item
+            is set.  The region must already exist on the page.
+        sequence: DA event sequence number.
+
+    Returns:
+        JSON with status, da_id, item_name, and instructions.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+
+    # Resolve chart region ID
+    chart_region_id: int | None = None
+    for reg in session.regions.values():
+        if reg.page_id == page_id and reg.region_name == chart_region_name:
+            chart_region_id = reg.region_id
+            break
+
+    # Resolve detail region ID
+    detail_region_id: int | None = None
+    for reg in session.regions.values():
+        if reg.page_id == page_id and reg.region_name == target_region_name:
+            detail_region_id = reg.region_id
+            break
+
+    full_item_name = (
+        f"P{page_id}_{target_item_name.upper()}"
+        if not target_item_name.upper().startswith(f"P{page_id}_")
+        else target_item_name.upper()
+    )
+
+    try:
+        # ── Ensure hidden item exists (create if not already in session) ──────
+        if full_item_name not in session.items:
+            # We need a region to attach the hidden item to — attach to chart region
+            # or create it as an application item fallback
+            if chart_region_id is not None:
+                hidden_item_id = ids.next(f"item_{page_id}_{full_item_name.lower()}")
+                db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_item(
+ p_id=>wwv_flow_imp.id({hidden_item_id})
+,p_name=>'{_esc(full_item_name)}'
+,p_item_sequence=>5
+,p_item_plug_id=>wwv_flow_imp.id({chart_region_id})
+,p_display_as=>'{ITEM_HIDDEN}'
+,p_label_alignment=>'RIGHT'
+,p_field_template=>{LABEL_OPTIONAL}
+,p_item_template_options=>'#DEFAULT#'
+);"""))
+                session.items[full_item_name] = ItemInfo(
+                    item_id=hidden_item_id, page_id=page_id,
+                    item_name=full_item_name, item_type="hidden",
+                )
+
+        # ── Dynamic Action: JET Chart click (custom event apexchartsclick) ───
+        da_id = ids.next(f"da_drilldown_{page_id}_{_esc(chart_region_name)}")
+        da_act_js_id = ids.next(f"da_drilldown_js_{page_id}")
+        da_act_refresh_id = ids.next(f"da_drilldown_ref_{page_id}")
+
+        trigger_lines = ""
+        if chart_region_id is not None:
+            trigger_lines = (
+                f",p_triggering_element_type=>'REGION'"
+                f"\n,p_triggering_region_id=>wwv_flow_imp.id({chart_region_id})"
+            )
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_event(
+ p_id=>wwv_flow_imp.id({da_id})
+,p_name=>'Drilldown {_esc(chart_region_name)} by {_esc(filter_column)}'
+,p_event_sequence=>{sequence}
+{trigger_lines}
+,p_bind_type=>'bind'
+,p_execution_type=>'IMMEDIATE'
+,p_bind_event_type=>'custom'
+,p_bind_event_type_custom=>'apexchartsclick'
+);"""))
+
+        # Action 1: set item from chart click data
+        drilldown_js = (
+            f"var label = (this.data && this.data.groupLabel) ? this.data.groupLabel : "
+            f"(this.data && this.data.label ? this.data.label : '');"
+            f"apex.item('{full_item_name}').setValue(label);"
+        )
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_act_js_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'TRUE'
+,p_action_sequence=>10
+,p_execute_on_page_init=>'N'
+,p_action=>'NATIVE_JAVASCRIPT_CODE'
+,p_attribute_01=>'{_esc(drilldown_js)}'
+);"""))
+
+        # Action 2: refresh detail IR
+        refresh_attr = ""
+        if detail_region_id is not None:
+            refresh_attr = (
+                f",p_affected_elements_type=>'REGION'"
+                f"\n,p_affected_region_id=>wwv_flow_imp.id({detail_region_id})"
+            )
+        else:
+            # Fall back to jQuery selector by region name
+            refresh_attr = (
+                f",p_affected_elements_type=>'JQUERY_SELECTOR'"
+                f"\n,p_affected_elements=>'[data-region-id=\"{_esc(target_region_name)}\"]'"
+            )
+
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_act_refresh_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'TRUE'
+,p_action_sequence=>20
+,p_execute_on_page_init=>'N'
+,p_action=>'NATIVE_REFRESH'
+{refresh_attr}
+);"""))
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "da_id": da_id,
+            "chart_region_name": chart_region_name,
+            "target_item": full_item_name,
+            "target_region": target_region_name,
+            "filter_column": filter_column,
+            "note": (
+                "The detail IR SQL must use :"
+                + full_item_name
+                + " as a bind variable in its WHERE clause. "
+                "The custom event 'apexchartsclick' fires when a JET Chart data point is clicked."
+            ),
+            "message": (
+                f"Chart drilldown DA created on page {page_id}: "
+                f"click on '{chart_region_name}' sets '{full_item_name}' "
+                f"and refreshes '{target_region_name}'."
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_file_upload
+# ---------------------------------------------------------------------------
+
+def apex_add_file_upload(
+    page_id: int,
+    region_name: str,
+    item_name: str,
+    label: str,
+    table_name: str,
+    pk_item: str,
+    blob_col: str,
+    filename_col: str,
+    mimetype_col: str,
+    sequence: int = 10,
+) -> str:
+    """Add a file-upload item + after-submit process that stores the file as a BLOB.
+
+    Creates:
+    1. A ``FILE_BROWSE`` page item in the specified region.
+    2. An after-submit PL/SQL process that reads the uploaded file from
+       ``APEX_APPLICATION_TEMP_FILES`` and merges it into the target table.
+
+    The uploaded file is associated with the row identified by ``pk_item``.  If
+    that item is NULL at submit time the MERGE is skipped gracefully.
+
+    Args:
+        page_id: Page ID.
+        region_name: Name of an existing region to place the file-browse item in.
+        item_name: Item name suffix — auto-prefixed with ``P{page_id}_``.
+        label: Display label for the file-browse field.
+        table_name: Database table that contains the BLOB column.
+        pk_item: Full page item name (or suffix) for the primary key of the row
+            to update (e.g., ``P10_ID``).  Auto-prefixed with ``P{page_id}_``
+            if needed.
+        blob_col: BLOB column name in ``table_name``.
+        filename_col: VARCHAR2 column that stores the original filename.
+        mimetype_col: VARCHAR2 column that stores the MIME type.
+        sequence: Display sequence for the FILE_BROWSE item.
+
+    Returns:
+        JSON with status, item_name, process_name, and instructions.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id not in session.pages:
+        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+
+    # Resolve parent region
+    region_id: int | None = None
+    for reg in session.regions.values():
+        if reg.page_id == page_id and reg.region_name == region_name:
+            region_id = reg.region_id
+            break
+    if region_id is None:
+        return json.dumps({
+            "status": "error",
+            "error": f"Region '{region_name}' not found on page {page_id}. Create it first with apex_add_region().",
+        })
+
+    # Normalize item names
+    full_item_name = (
+        f"P{page_id}_{item_name.upper()}"
+        if not item_name.upper().startswith(f"P{page_id}_")
+        else item_name.upper()
+    )
+    full_pk_item = (
+        f"P{page_id}_{pk_item.upper()}"
+        if not pk_item.upper().startswith(f"P{page_id}_")
+        else pk_item.upper()
+    )
+    upper_table = table_name.upper()
+    upper_blob = blob_col.upper()
+    upper_fname = filename_col.upper()
+    upper_mime = mimetype_col.upper()
+
+    created: list[str] = []
+
+    try:
+        # ── FILE_BROWSE item ──────────────────────────────────────────────────
+        item_id = ids.next(f"item_{page_id}_{full_item_name.lower()}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_item(
+ p_id=>wwv_flow_imp.id({item_id})
+,p_name=>'{_esc(full_item_name)}'
+,p_item_sequence=>{sequence}
+,p_item_plug_id=>wwv_flow_imp.id({region_id})
+,p_prompt=>'{_esc(label)}'
+,p_display_as=>'NATIVE_FILE_BROWSE'
+,p_label_alignment=>'RIGHT'
+,p_field_template=>{LABEL_OPTIONAL}
+,p_item_template_options=>'#DEFAULT#'
+,p_attribute_01=>'APEX_APPLICATION_TEMP_FILES'
+,p_attribute_02=>'attachment'
+);"""))
+        session.items[full_item_name] = ItemInfo(
+            item_id=item_id, page_id=page_id,
+            item_name=full_item_name, item_type="file_browse",
+        )
+        created.append(f"item:{full_item_name}")
+
+        # ── After-submit PL/SQL process: MERGE file into BLOB column ─────────
+        process_name = f"Upload File {item_name.upper()}"
+        upload_plsql = (
+            f"DECLARE\n"
+            f"  v_pk VARCHAR2(4000) := :{full_pk_item};\n"
+            f"BEGIN\n"
+            f"  IF :{full_item_name} IS NOT NULL AND v_pk IS NOT NULL THEN\n"
+            f"    MERGE INTO {upper_table} tgt\n"
+            f"    USING (\n"
+            f"      SELECT f.blob_content AS blob_content,\n"
+            f"             f.filename      AS filename,\n"
+            f"             f.mime_type     AS mime_type\n"
+            f"        FROM apex_application_temp_files f\n"
+            f"       WHERE f.name = :{full_item_name}\n"
+            f"         AND rownum = 1\n"
+            f"    ) src ON (tgt.ID = v_pk)\n"
+            f"    WHEN MATCHED THEN\n"
+            f"      UPDATE SET\n"
+            f"        tgt.{upper_blob}  = src.blob_content,\n"
+            f"        tgt.{upper_fname} = src.filename,\n"
+            f"        tgt.{upper_mime}  = src.mime_type\n"
+            f"    WHEN NOT MATCHED THEN\n"
+            f"      INSERT (ID, {upper_blob}, {upper_fname}, {upper_mime})\n"
+            f"      VALUES (v_pk, src.blob_content, src.filename, src.mime_type);\n"
+            f"    COMMIT;\n"
+            f"  END IF;\n"
+            f"END;"
+        )
+
+        proc_id = ids.next(f"proc_upload_{page_id}_{_esc(item_name)}")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_process(
+ p_id=>wwv_flow_imp.id({proc_id})
+,p_process_sequence=>{sequence}
+,p_process_point=>'AFTER_SUBMIT'
+,p_process_type=>'{PROC_PLSQL}'
+,p_process_name=>'{_esc(process_name)}'
+,p_process_sql_clob=>{_sql_to_varchar2(upload_plsql)}
+,p_process_clob_language=>'PLSQL'
+,p_error_display_location=>'INLINE_IN_NOTIFICATION'
+,p_success_message=>'File uploaded successfully.'
+);"""))
+        session.app_processes.append(process_name)
+        created.append(f"process:{process_name}")
+
+        return json.dumps({
+            "status": "ok",
+            "page_id": page_id,
+            "item_name": full_item_name,
+            "pk_item": full_pk_item,
+            "process_name": process_name,
+            "table_name": upper_table,
+            "blob_col": upper_blob,
+            "filename_col": upper_fname,
+            "mimetype_col": upper_mime,
+            "created": created,
+            "note": (
+                f"The MERGE uses tgt.ID = :{full_pk_item}. "
+                "If your PK column name differs from 'ID', edit the generated process source "
+                "via apex_edit_page_component() after creation."
+            ),
+            "message": (
+                f"File upload item '{full_item_name}' and process '{process_name}' "
+                f"added to page {page_id}. Uploads will be stored in "
+                f"{upper_table}.{upper_blob}."
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)

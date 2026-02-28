@@ -63,6 +63,20 @@ class ImportSession:
     _lock: threading.RLock = field(
         default_factory=threading.RLock, init=False, repr=False, compare=False
     )
+    # Rollback tracking: list of (component_type, component_id) for rollback
+    _created_components: list = field(default_factory=list, init=False, repr=False, compare=False)
+
+    def track_component(self, component_type: str, component_id: int) -> None:
+        """Track a created component for potential rollback."""
+        with self._lock:
+            self._created_components.append((component_type, component_id))
+
+    def pop_rollback_log(self) -> list:
+        """Return and clear the component tracking log."""
+        with self._lock:
+            log = list(self._created_components)
+            self._created_components.clear()
+            return log
 
     def reset(self) -> None:
         with self._lock:
@@ -80,6 +94,7 @@ class ImportSession:
             self.app_items.clear()
             self.app_processes.clear()
             self.buttons.clear()
+            self._created_components.clear()
 
     def summary(self) -> dict:
         return {
@@ -95,6 +110,7 @@ class ImportSession:
             "nav_items": len(self.nav_items),
             "app_items": len(self.app_items),
             "app_processes": len(self.app_processes),
+            "tracked_components": len(self._created_components),
             "page_list": [
                 {"page_id": p.page_id, "name": p.page_name, "type": p.page_type}
                 for p in self.pages.values()
