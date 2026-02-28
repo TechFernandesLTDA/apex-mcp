@@ -167,38 +167,17 @@ wwv_flow_imp_page.create_page_plug(
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_region_id=>wwv_flow_imp.id({region_id})
-,p_max_row_count=>'1000000'
-,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows. Please apply a filter to reduce the number of records in your query.'
+,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows.  Please apply a filter to reduce the number of records in your query.'
 ,p_no_data_found_message=>'No data found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
 ,p_lazy_loading=>false
 ,p_show_detail_link=>'N'
-,p_show_rows_per_page=>'N'
-,p_show_search_bar=>'Y'
-,p_search_button_label=>'Search'
-,p_show_actions_menu=>'Y'
-,p_show_select_columns=>'Y'
-,p_show_filter=>'Y'
-,p_show_sort=>'Y'
-,p_show_control_break=>'Y'
-,p_show_highlight=>'Y'
-,p_show_computation=>'Y'
-,p_show_aggregate=>'Y'
-,p_show_chart=>'Y'
-,p_show_group_by=>'Y'
-,p_show_pivot=>'Y'
-,p_show_flashback=>'Y'
-,p_show_save_report=>'Y'
-,p_show_download=>'Y'
 ,p_show_notify=>'Y'
-,p_show_reset=>'Y'
-,p_show_help=>'N'
 ,p_download_formats=>'CSV:HTML:XLSX'
 ,p_enable_mail_download=>'Y'
-,p_version_scn=>1
+,p_internal_uid=>{ws_id}
 );"""))
 
         # Update session state
@@ -594,7 +573,7 @@ def apex_add_process(
             # If button ID not found, skip condition (process runs on any submit)
 
         # Success / error messages
-        success_line = f",p_success_message=>'{_esc(success_message)}'" if success_message else ""
+        success_line = f",p_process_success_message=>'{_esc(success_message)}'" if success_message else ""
         error_line = f",p_error_display_location=>'INLINE_IN_NOTIFICATION'" if error_message else ""
 
         db.plsql(_blk(f"""
