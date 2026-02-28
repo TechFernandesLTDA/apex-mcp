@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "apex-mcp"
+version = "0.1.0"
+description = "MCP Server for Oracle APEX 24.2 development via natural language"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.0.0",
+    "oracledb>=2.0.0",
+]
+
+[project.scripts]
+apex-mcp = "apex_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apex_mcp"]
