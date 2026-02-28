@@ -108,12 +108,12 @@ def _infer_item_type(
       1. PK column  -> NATIVE_HIDDEN
       2. FK column  -> NATIVE_SELECT_LIST
       3. FL_ prefix -> NATIVE_YES_NO
-      4. DT_ prefix -> NATIVE_DATE_PICKER_JET
+      4. DT_ prefix -> NATIVE_DATE_PICKER_APEX
       5. DS_ prefix + length > 500 -> NATIVE_TEXTAREA
       6. DS_ prefix -> NATIVE_TEXT_FIELD
       7. NR_ prefix -> NATIVE_NUMBER_FIELD
       8. data_type NUMBER -> NATIVE_NUMBER_FIELD
-      9. data_type DATE/TIMESTAMP -> NATIVE_DATE_PICKER_JET
+      9. data_type DATE/TIMESTAMP -> NATIVE_DATE_PICKER_APEX
      10. data_type CLOB or length > 4000 -> NATIVE_TEXTAREA
      11. default -> NATIVE_TEXT_FIELD
     """
@@ -525,11 +525,17 @@ wwv_flow_imp_page.create_page_plug(
             if item_type == ITEM_SELECT and col_name.upper() in lov_ids:
                 lov_clause = f",p_lov=>wwv_flow_imp.id({lov_ids[col_name.upper()]})\n,p_lov_display_null=>'YES'\n,p_lov_null_text=>'-Select-'"
 
-            # Extra attributes for TEXTAREA (height hint)
+            # Extra attributes for TEXTAREA (height hint) and DATE (plugin config)
             extra_attrs = ""
             if item_type == ITEM_TEXTAREA:
                 height = col_descriptor.get("height", 4)
                 extra_attrs = f",p_display_height=>{height}"
+            elif item_type == ITEM_DATE:
+                extra_attrs = (
+                    ",p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2("
+                    "'display_as','POPUP','max_date','NONE','min_date','NONE',"
+                    "'multiple_months','N','show_time','N','use_defaults','Y')).to_clob"
+                )
 
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(

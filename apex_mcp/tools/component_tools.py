@@ -308,6 +308,15 @@ def apex_add_item(
         readonly_line = ",p_read_only_when_type=>'ALWAYS'" if read_only else ""
         colspan_line = f",p_grid_column_span=>{colspan}" if colspan and colspan != 1 else ""
 
+        # Date picker requires plugin attributes (APEX 24.2)
+        attrs_line = ""
+        if item_type_lower == "date":
+            attrs_line = (
+                ",p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2("
+                "'display_as','POPUP','max_date','NONE','min_date','NONE',"
+                "'multiple_months','N','show_time','N','use_defaults','Y')).to_clob"
+            )
+
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({item_id})
@@ -325,6 +334,7 @@ wwv_flow_imp_page.create_page_item(
 {default_line}
 {readonly_line}
 {colspan_line}
+{attrs_line}
 );"""))
 
         # Update session state

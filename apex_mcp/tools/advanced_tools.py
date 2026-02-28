@@ -122,6 +122,11 @@ wwv_flow_imp_page.create_page_plug(
                 fi_lov = fi.get("lov", "")
                 item_id = ids.next(f"item_{page_id}_{fi_name.lower()}")
                 lov_line = f",p_lov=>'{_esc(fi_lov)}'\n,p_lov_display_null=>'YES'\n,p_lov_null_text=>'- All -'" if fi_lov else ""
+                date_attrs_fi = (
+                    ",p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2("
+                    "'display_as','POPUP','max_date','NONE','min_date','NONE',"
+                    "'multiple_months','N','show_time','N','use_defaults','Y')).to_clob"
+                ) if fi_type == ITEM_DATE else ""
                 db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({item_id})
@@ -134,6 +139,7 @@ wwv_flow_imp_page.create_page_item(
 ,p_field_template=>{LABEL_OPTIONAL}
 ,p_item_template_options=>'#DEFAULT#'
 {lov_line}
+{date_attrs_fi}
 );"""))
                 session.items[item_name] = ItemInfo(item_id=item_id, page_id=page_id, item_name=item_name, item_type=fi_type)
                 items_created.append(item_name)
@@ -340,6 +346,12 @@ wwv_flow_imp_page.create_page_plug(
                 label_tmpl = LABEL_REQUIRED if is_req else LABEL_OPTIONAL
                 item_id = ids.next(f"item_{page_id}_{item.get('name','').lower()}")
                 lov_line = f",p_lov=>'{_esc(item_lov)}'\n,p_lov_display_null=>'YES'" if item_lov else ""
+                # Date picker requires plugin attributes in APEX 24.2
+                date_attrs = (
+                    ",p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2("
+                    "'display_as','POPUP','max_date','NONE','min_date','NONE',"
+                    "'multiple_months','N','show_time','N','use_defaults','Y')).to_clob"
+                ) if item_type == ITEM_DATE else ""
                 db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
  p_id=>wwv_flow_imp.id({item_id})
@@ -352,6 +364,7 @@ wwv_flow_imp_page.create_page_item(
 ,p_field_template=>{label_tmpl}
 ,p_item_template_options=>'#DEFAULT#'
 {lov_line}
+{date_attrs}
 );"""))
                 session.items[item_name] = ItemInfo(item_id=item_id, page_id=page_id, item_name=item_name, item_type=item_type)
                 all_items.append(item_name)
@@ -792,6 +805,11 @@ def apex_bulk_add_items(
             default_line = f",p_item_default=>'{_esc(default)}'" if default else ""
             placeholder_line = f",p_placeholder=>'{_esc(placeholder)}'" if placeholder else ""
             colspan_line = f",p_colspan=>{colspan}" if colspan and colspan > 1 else ""
+            date_attrs_bulk = (
+                ",p_attributes=>wwv_flow_t_plugin_attributes(wwv_flow_t_varchar2("
+                "'display_as','POPUP','max_date','NONE','min_date','NONE',"
+                "'multiple_months','N','show_time','N','use_defaults','Y')).to_clob"
+            ) if item_type == ITEM_DATE else ""
 
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_item(
@@ -808,6 +826,7 @@ wwv_flow_imp_page.create_page_item(
 {default_line}
 {placeholder_line}
 {colspan_line}
+{date_attrs_bulk}
 );"""))
             session.items[item_name] = ItemInfo(item_id=item_id, page_id=page_id, item_name=item_name, item_type=item_type)
             items_created.append(item_name)
