@@ -1,6 +1,6 @@
 # apex-mcp — Oracle APEX MCP Server
 
-> Create, inspect, and modify **Oracle APEX 24.2** applications via natural language using Claude Code.
+> Build, inspect, and modify **Oracle APEX 24.2** applications via natural language using Claude Code.
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![FastMCP](https://img.shields.io/badge/FastMCP-3.x-green)](https://github.com/jlowin/fastmcp)
@@ -9,96 +9,37 @@
 
 ---
 
-## What is this?
+## Overview
 
-**apex-mcp** is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **50 tools** for building Oracle APEX applications through AI. Instead of navigating the APEX App Builder UI, you describe what you want and Claude Code does the work.
+**apex-mcp** is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **82 tools** for building Oracle APEX 24.2 applications through AI assistants such as Claude Code. Built on FastMCP 3.x and Python 3.11+, it connects to Oracle Autonomous Database via the `oracledb` thin driver (mTLS wallet — no Oracle Instant Client required). Instead of navigating the APEX App Builder UI, you describe what you want and the AI does the work: create apps, generate CRUD pages, add JET charts, configure auth schemes, export pages, generate REST endpoints, and more — all through natural language.
 
 ```
-"Create a CRUD for the EMPLOYEES table on pages 10 and 11, then add it to the nav menu"
-→ apex_describe_table("EMPLOYEES")
-→ apex_generate_crud("EMPLOYEES", 10, 11)
-→ apex_add_nav_item("Employees", 10, 20, "fa-users")
+"Create a full HR app from the EMPLOYEES and DEPARTMENTS tables with an analytics dashboard"
+→ apex_connect()
+→ apex_generate_from_schema(["EMPLOYEES","DEPARTMENTS"], start_page_id=10, include_dashboard=True)
+→ apex_add_nav_item("Dashboard", 1, 10, "fa-home")
+→ apex_finalize_app()
 ```
 
 ---
 
-## Features
+## Quick Start
 
-| Category | Tools | Description |
-|----------|-------|-------------|
-| **Setup & Diagnostics** | 4 | Connection guide, requirements check, permission audit, fix grants |
-| **Connection** | 3 | Connect to ADB, run SQL, check session state |
-| **App Lifecycle** | 5 | Create/delete/list/finalize/export apps |
-| **Pages** | 2 | Add pages (blank, form, report, login, dashboard, modal) |
-| **Components** | 5 | Regions, items, buttons, processes, dynamic actions |
-| **Shared Components** | 5 | LOVs, auth schemes, nav items, app items, app processes |
-| **Schema Introspection** | 2 | List tables, describe table (columns, PKs, FKs, sequences) |
-| **Generators** | 3 | Auto-generate CRUD, dashboard, login page |
-| **JavaScript** | 3 | Page JS, global JS, AJAX handler generator |
-| **Inspection & Editing** | 14 | Read/update/delete/diff existing app components |
-| **Validations & Computations** | 2 | Item validations, item computations |
-| **Visuals** | 3 | JET charts (bar/line/area/pie/donut), animated metric cards, analytics page generator |
-| **User Management** | 2 | Create/list APEX workspace users |
-
----
-
-## Prerequisites
-
-### 1. Oracle Autonomous Database
-
-You need an Oracle Autonomous Database (ADB) instance.
-
-1. In [Oracle Cloud Console](https://cloud.oracle.com), go to **Oracle Database → Autonomous Database**
-2. Create or use an existing ADB instance (**Transaction Processing** recommended)
-3. Click **DB Connection** → Download wallet → Extract to a local directory
-4. Note the **wallet password** and the **DSN alias** from `tnsnames.ora` (e.g., `mydb_tp`)
-
-### 2. Oracle APEX Workspace
-
-1. Access APEX Admin at `https://<your-adb-host>/ords/apex_admin`
-2. Create a Workspace and associate it with a database schema
-3. Note the **Workspace ID**: Admin → Manage Workspaces → click workspace → see ID in URL
-4. The schema user (e.g., `MY_SCHEMA`) must be the workspace-linked schema
-
-### 3. Required Database Permissions
-
-The schema user needs:
-
-```sql
--- Minimum (auto-granted to workspace schemas):
--- CREATE SESSION, ALTER SESSION
--- SELECT on APEX_* views
--- EXECUTE on WWV_FLOW_IMP, WWV_FLOW_IMP_SHARED, WWV_IMP_WORKSPACE, WWV_FLOW_IMP_PAGE
-
--- For editing existing apps (apex_update_*, apex_delete_*):
--- Run as ADMIN or SYS:
-GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA;
-GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_STEP_ITEMS TO MY_SCHEMA;
-GRANT SELECT, DELETE ON WWV_FLOW_STEPS TO MY_SCHEMA;
-```
-
-> **Note:** If your schema is the APEX workspace-linked schema, most permissions are already granted automatically. Use `apex_check_permissions()` to verify.
-
-### 4. Python Environment
+### 1. Install dependencies
 
 ```bash
-python --version   # Requires 3.11+
 pip install fastmcp oracledb
 ```
 
----
-
-## Installation
-
-### Step 1: Clone the repository
+### 2. Clone and install the server
 
 ```bash
-git clone https://github.com/TechFernandesLTDA/apex-mcp.git
+git clone https://github.com/techfernandes/apex-mcp.git
 cd apex-mcp/mcp-server
 pip install -e .
 ```
 
-### Step 2: Create `.mcp.json` in your project root
+### 3. Configure `.mcp.json` in your project root
 
 ```json
 {
@@ -122,18 +63,6 @@ pip install -e .
 }
 ```
 
-### Step 3: Verify in Claude Code
-
-```
-/mcp
-```
-
-You should see `apex-dev` with **50 tools**. If not, run `apex_check_requirements()` to diagnose.
-
----
-
-## Environment Variables
-
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `ORACLE_DB_USER` | Yes | Database username (workspace schema) | `MY_SCHEMA` |
@@ -143,295 +72,287 @@ You should see `apex-dev` with **50 tools**. If not, run `apex_check_requirement
 | `ORACLE_WALLET_PASSWORD` | Yes | Wallet decryption password | `wallet123` |
 | `APEX_WORKSPACE_ID` | Yes | Numeric APEX workspace ID | `8822816515098715` |
 | `APEX_SCHEMA` | Yes | Schema associated with APEX workspace | `MY_SCHEMA` |
-| `APEX_WORKSPACE_NAME` | No | Workspace name | `MYWORKSPACE` |
+| `APEX_WORKSPACE_NAME` | No | Workspace name (display only) | `MYWORKSPACE` |
 
-### Finding your Workspace ID
+> **Finding your Workspace ID:** APEX Admin Console → Manage Workspaces → click workspace → ID shown in the URL or details panel.
+>
+> **Finding your DSN:** Open `wallet/tnsnames.ora` — the alias names before `=` are your options. Use the `_tp` alias for APEX (OLTP).
+>
+> **Wallet directory:** Point to the extracted folder containing `tnsnames.ora`, `sqlnet.ora`, `cwallet.sso`, and `ewallet.p12`. Do not point to the ZIP file.
 
-In APEX Admin Console:
-Admin → Manage Workspaces → [click your workspace] → ID shown in the page URL or details.
+### 4. Verify in Claude Code
 
-### Finding your DSN
-
-Open `wallet/tnsnames.ora` — the alias names before `=` are your DSN options:
 ```
-mydb_tp = (DESCRIPTION = ...)    ← use "mydb_tp" for OLTP (recommended for APEX)
-mydb_high = (DESCRIPTION = ...)  ← high priority (analytics)
-```
-
-### Wallet directory contents
-
-The extracted wallet folder must contain:
-```
-wallet/
-├── tnsnames.ora       ← required
-├── sqlnet.ora         ← required
-├── cwallet.sso        ← required
-├── ewallet.p12        ← required
-├── ojdbc.properties
-└── ...
+/mcp
 ```
 
-> Do **not** point to the ZIP file — extract it first.
-
----
-
-## Quick Start
-
-Once connected in Claude Code, try these commands:
-
-```python
-# 1. Check setup
-apex_setup_guide()           # Full setup documentation
-apex_check_requirements()    # Verify installation
-apex_check_permissions()     # Check DB permissions
-
-# 2. Connect
-apex_connect()               # Uses env vars automatically
-
-# 3. Explore your schema
-apex_list_tables()           # All tables in schema
-apex_describe_table("EMPLOYEES")  # Columns, PKs, FKs
-
-# 4. Create an app
-apex_create_app(app_id=200, app_name="HR System")
-apex_generate_login(page_id=101, app_name="HR System")
-apex_add_page(1, "Dashboard", "blank")
-
-# 5. Generate CRUD pages (automatic!)
-apex_generate_crud("EMPLOYEES", 10, 11)
-apex_generate_crud("DEPARTMENTS", 20, 21)
-
-# 6. Add navigation
-apex_add_nav_item("Dashboard", 1, 10, "fa-home")
-apex_add_nav_item("Employees", 10, 20, "fa-users")
-apex_add_nav_item("Departments", 20, 30, "fa-building")
-
-# 7. Add authorization
-apex_add_auth_scheme("IS_ADMIN",
-    "return apex_util.get_session_state('APP_ROLE') = 'ADMIN';",
-    "Admin access required.")
-
-# 8. Finalize
-apex_finalize_app()
-```
-
-Access your app at: `f?p=200` (relative to your APEX base URL)
+You should see `apex-dev` with **82 tools**. If not, call `apex_check_requirements()` to diagnose.
 
 ---
 
 ## Tool Reference
 
-### Setup & Diagnostics
+### Setup & Diagnostics (4)
 
 | Tool | Description |
 |------|-------------|
-| `apex_setup_guide()` | Complete setup guide with all requirements |
-| `apex_check_requirements()` | Verify packages, env vars, wallet, connectivity |
-| `apex_check_permissions()` | Audit DB permissions for all MCP operations |
+| `apex_setup_guide()` | Full setup guide with all requirements and step-by-step instructions |
+| `apex_check_requirements()` | Verify Python packages, env vars, wallet contents, and DB connectivity |
+| `apex_check_permissions()` | Audit database grants needed for all MCP operations |
+| `apex_fix_permissions()` | Attempt to auto-grant missing privileges (requires ADMIN/DBA connection) |
 
-### Connection & Session
-
-| Tool | Description |
-|------|-------------|
-| `apex_connect(user?, password?, dsn?, wallet_dir?, wallet_password?)` | Connect to Oracle ADB |
-| `apex_run_sql(sql, max_rows?)` | Execute SELECT or PL/SQL |
-| `apex_status()` | Current session state (app, pages, components built) |
-
-### App Lifecycle
+### Connection (3)
 
 | Tool | Description |
 |------|-------------|
-| `apex_list_apps()` | List apps in the workspace |
-| `apex_create_app(app_id, app_name, ...)` | Create app scaffold (theme + auth + nav) |
-| `apex_finalize_app()` | Finalize import (must call when done!) |
-| `apex_delete_app(app_id)` | Delete an application |
+| `apex_connect(...)` | Connect to Oracle ADB using env vars or explicit credentials |
+| `apex_run_sql(sql, max_rows?)` | Execute any SELECT or PL/SQL statement and return results |
+| `apex_status()` | Show current session state: app, pages built, components created |
 
-### Pages
-
-| Tool | Description |
-|------|-------------|
-| `apex_add_page(page_id, page_name, page_type?, ...)` | Add page: blank/form/report/login/dashboard/modal |
-| `apex_list_pages(app_id?)` | List pages via APEX dictionary |
-
-### Components
+### App Lifecycle (7)
 
 | Tool | Description |
 |------|-------------|
-| `apex_add_region(page_id, region_name, region_type?, ...)` | Add region: static/ir/form/chart/plsql |
-| `apex_add_item(page_id, region_name, item_name, item_type?, ...)` | Add form field |
-| `apex_add_button(page_id, region_name, button_name, label, action?, ...)` | Add button |
-| `apex_add_process(page_id, process_name, process_type?, ...)` | Add server process: dml/plsql/ajax |
-| `apex_add_dynamic_action(page_id, da_name, event?, ...)` | Add Dynamic Action |
+| `apex_list_apps()` | List all applications in the workspace |
+| `apex_create_app(app_id, app_name, ...)` | Create app scaffold with Universal Theme 42, auth, and nav menu |
+| `apex_finalize_app()` | Commit the import session — must be called when done building |
+| `apex_delete_app(app_id)` | Permanently delete an application |
+| `apex_export_app(app_id, output_path?)` | Export application as a SQL script |
+| `apex_describe_page(app_id, page_id)` | Describe a page's purpose and component summary |
+| `apex_dry_run_preview(enabled)` | Toggle dry-run mode: queue PL/SQL without executing, then return the full log |
 
-### Shared Components
-
-| Tool | Description |
-|------|-------------|
-| `apex_add_lov(lov_name, lov_type?, sql_query?, static_values?)` | Create LOV |
-| `apex_add_auth_scheme(scheme_name, function_body, error_message?, ...)` | Create auth scheme |
-| `apex_add_nav_item(item_name, target_page, sequence?, icon?, ...)` | Add nav menu item |
-| `apex_add_app_item(item_name, scope?, protection?)` | Create session-level variable |
-| `apex_add_app_process(process_name, plsql_body, point?, ...)` | Create app-level process |
-
-### Schema Introspection
+### Pages (2)
 
 | Tool | Description |
 |------|-------------|
-| `apex_list_tables(pattern?, include_columns?)` | List schema tables with columns |
-| `apex_describe_table(table_name)` | Full table metadata: columns, PKs, FKs, indexes |
+| `apex_add_page(page_id, page_name, page_type?, ...)` | Add a page: blank / form / report / login / dashboard / modal |
+| `apex_list_pages(app_id?)` | List all pages via the APEX dictionary |
 
-### Generators (High-Level)
-
-| Tool | Description |
-|------|-------------|
-| `apex_generate_crud(table_name, list_page_id, form_page_id, ...)` | **Full CRUD**: IR list + form with DML, auto-inferred types |
-| `apex_generate_dashboard(page_id, kpi_queries?, ir_sql?, ...)` | Dashboard with KPI cards + IR |
-| `apex_generate_login(page_id?, app_name?, auth_process_plsql?, ...)` | Professional login page |
-
-### JavaScript
+### Components (5)
 
 | Tool | Description |
 |------|-------------|
-| `apex_add_page_js(page_id, javascript_code, js_file_urls?)` | Add inline JS to a page |
-| `apex_add_global_js(function_name, javascript_code, ...)` | Generate reusable JS + upload instructions |
-| `apex_generate_ajax_handler(page_id, callback_name, plsql_code, ...)` | Create AJAX endpoint + JS caller |
+| `apex_add_region(page_id, region_name, region_type?, ...)` | Add a region: static / interactive report / form / chart / PL/SQL |
+| `apex_add_item(page_id, region_name, item_name, item_type?, ...)` | Add a form field to a region |
+| `apex_add_button(page_id, region_name, button_name, label, action?, ...)` | Add a button with submit, redirect, or custom action |
+| `apex_add_process(page_id, process_name, process_type?, ...)` | Add a server-side process: DML / PL/SQL / AJAX on-demand |
+| `apex_add_dynamic_action(page_id, da_name, event?, ...)` | Add a Dynamic Action with event, condition, and true/false actions |
 
-### Inspection & Editing (Existing Apps)
+### Shared Components (5)
 
 | Tool | Description |
 |------|-------------|
-| `apex_get_app_details(app_id)` | Full app metadata |
-| `apex_get_page_details(app_id, page_id)` | All components on a page |
-| `apex_list_regions(app_id, page_id)` | Regions list |
-| `apex_list_items(app_id, page_id, region_name?)` | Items list |
-| `apex_list_processes(app_id, page_id)` | Server processes |
-| `apex_list_dynamic_actions(app_id, page_id)` | Dynamic Actions |
-| `apex_list_lovs(app_id)` | Shared LOVs |
-| `apex_list_auth_schemes(app_id)` | Auth schemes |
-| `apex_update_region(app_id, page_id, region_name, ...)` | Update region properties |
-| `apex_update_item(app_id, page_id, item_name, ...)` | Update item properties |
-| `apex_delete_page(app_id, page_id)` | Delete a page |
-| `apex_delete_region(app_id, page_id, region_name)` | Delete a region |
-| `apex_copy_page(src_app, src_page, tgt_app, tgt_page, ...)` | Copy page between apps |
+| `apex_add_lov(lov_name, lov_type?, sql_query?, static_values?)` | Create a shared List of Values (SQL query or static) |
+| `apex_add_auth_scheme(scheme_name, function_body, error_message?, ...)` | Create a PL/SQL-based authorization scheme |
+| `apex_add_nav_item(item_name, target_page, sequence?, icon?, ...)` | Add an item to the navigation menu |
+| `apex_add_app_item(item_name, scope?, protection?)` | Create a session-level application item (global variable) |
+| `apex_add_app_process(process_name, plsql_body, point?, ...)` | Create an application-level process running at a specified page event |
 
-### Visuals — JET Charts & Metric Cards
+### Schema Introspection (3)
+
+| Tool | Description |
+|------|-------------|
+| `apex_list_tables(pattern?, include_columns?)` | List all tables in the schema, optionally filtered by name pattern |
+| `apex_describe_table(table_name)` | Full table metadata: columns, data types, PKs, FKs, and indexes |
+| `apex_detect_relationships(tables)` | Detect FK relationships between a list of tables |
+
+### Generators (3)
+
+| Tool | Description |
+|------|-------------|
+| `apex_generate_crud(table_name, list_page_id, form_page_id, ...)` | Full CRUD: Interactive Report list + form with DML, auto-inferred item types |
+| `apex_generate_dashboard(page_id, kpi_queries?, ir_sql?, ...)` | Dashboard page with KPI cards and an Interactive Report |
+| `apex_generate_login(page_id?, app_name?, auth_process_plsql?, ...)` | Professional login page with branded layout |
+
+### User Management (2)
+
+| Tool | Description |
+|------|-------------|
+| `apex_create_user(username, password, email?, ...)` | Create an APEX workspace user |
+| `apex_list_users(workspace_id?)` | List all users in the workspace |
+
+### JavaScript (3)
+
+| Tool | Description |
+|------|-------------|
+| `apex_add_page_js(page_id, javascript_code, js_file_urls?)` | Add inline JavaScript to a specific page |
+| `apex_add_global_js(function_name, javascript_code, ...)` | Generate a reusable JS function with upload instructions for Static Files |
+| `apex_generate_ajax_handler(page_id, callback_name, plsql_code, ...)` | Create an AJAX on-demand process + matching JavaScript caller function |
+
+### Inspection & Editing (14)
+
+| Tool | Description |
+|------|-------------|
+| `apex_get_app_details(app_id)` | Full application metadata from the APEX dictionary |
+| `apex_get_page_details(app_id, page_id)` | All components on a page: regions, items, processes, DAs |
+| `apex_list_regions(app_id, page_id)` | List regions on a page with type and source |
+| `apex_list_items(app_id, page_id, region_name?)` | List form items on a page, optionally filtered by region |
+| `apex_list_processes(app_id, page_id)` | List server-side processes on a page |
+| `apex_list_dynamic_actions(app_id, page_id)` | List Dynamic Actions on a page |
+| `apex_list_lovs(app_id)` | List all shared LOVs in the application |
+| `apex_list_auth_schemes(app_id)` | List all authorization schemes |
+| `apex_update_region(app_id, page_id, region_name, ...)` | Update region properties (SQL source, title, template, etc.) |
+| `apex_update_item(app_id, page_id, item_name, ...)` | Update item properties (LOV, type, label, default, etc.) |
+| `apex_delete_page(app_id, page_id)` | Delete a page from an application |
+| `apex_delete_region(app_id, page_id, region_name)` | Delete a specific region from a page |
+| `apex_copy_page(src_app, src_page, tgt_app, tgt_page, ...)` | Copy a page between applications |
+| `apex_diff_app(app_id)` | Compare current app state against session baseline, showing changes |
+
+### Validations (2)
+
+| Tool | Description |
+|------|-------------|
+| `apex_add_item_validation(page_id, item_name, validation_type, ...)` | Add a server-side validation to a form item |
+| `apex_add_item_computation(page_id, item_name, computation_type, ...)` | Add a computation to derive an item's value at page load or submit |
+
+### Visual — Charts & Cards (7)
 
 | Tool | Description |
 |------|-------------|
 | `apex_add_jet_chart(page_id, region_name, chart_type, sql_query, ...)` | Oracle JET chart: bar / bar_horizontal / line / area / pie / donut / combo |
-| `apex_add_metric_cards(page_id, region_name, metrics, style?, columns?)` | Animated metric tiles with inline HTML+JS — styles: gradient / white / dark |
-| `apex_generate_analytics_page(page_id, page_name, metrics, charts, ...)` | Full analytics page in one call: metric cards + multiple JET charts |
+| `apex_add_gauge(page_id, region_name, sql_query, ...)` | Dial gauge with configurable min, max, and threshold bands |
+| `apex_add_funnel(page_id, region_name, sql_query, ...)` | Funnel chart for pipeline or conversion stages |
+| `apex_add_sparkline(page_id, region_name, metrics, ...)` | Inline sparkline trend charts embedded in KPI cards |
+| `apex_add_metric_cards(page_id, region_name, metrics, style?, columns?)` | Animated metric tiles — styles: gradient / white / dark |
+| `apex_add_calendar(page_id, region_name, sql_query, date_column, ...)` | Calendar region for date-based data, month or week view |
+| `apex_generate_analytics_page(page_id, page_name, metrics, charts, ...)` | Complete analytics page in one call: metric cards + multiple JET charts |
 
-**`apex_add_jet_chart` chart types:**
-
-| type | Best for |
-|------|----------|
-| `bar` | Categorical comparisons |
-| `bar_horizontal` | Ranked lists (top N items) |
-| `line` | Time-series trends |
-| `area` | Cumulative / stacked data |
-| `pie` | Distribution (max 8 slices) |
-| `donut` | Distribution with center space for KPI |
-| `combo` | Bar + line on same axes (use `extra_series`) |
-
-**`apex_add_metric_cards` styles:**
-
-| style | Appearance |
-|-------|------------|
-| `gradient` | Colored gradient background, white text, animated counter |
-| `white` | White card with colored left border accent |
-| `dark` | Dark background with neon accent color |
-
-### User Management
+### Advanced Components (10)
 
 | Tool | Description |
 |------|-------------|
-| `apex_create_user(username, password, email?, ...)` | Create APEX workspace user |
-| `apex_list_users(workspace_id?)` | List workspace users |
+| `apex_generate_report_page(page_id, page_name, sql_query, ...)` | Interactive Report page with optional filter bar items |
+| `apex_generate_wizard(start_page_id, steps, wizard_title, ...)` | Multi-step wizard with previous/next navigation and finish redirect |
+| `apex_add_notification_region(page_id, region_name, message, ...)` | Info / warning / success / error alert region, optionally dismissible |
+| `apex_add_page_css(page_id, css_code, ...)` | Inject inline CSS scoped to a specific page |
+| `apex_add_interactive_grid(page_id, region_name, table_name, ...)` | Editable Interactive Grid (spreadsheet-style) with optional add-row |
+| `apex_bulk_add_items(page_id, region_name, items)` | Create multiple form items in one call from a list of definitions |
+| `apex_validate_app()` | Run an app health check and return a score (0-100) plus issues list |
+| `apex_preview_page(app_id, page_id)` | Return a structural preview of a page without opening a browser |
+| `apex_add_search_bar(page_id, region_name, target_region, ...)` | Add a search input wired to filter an existing Interactive Report |
+| `apex_generate_from_schema(tables, start_page_id, ...)` | Generate a complete multi-page app (CRUD + optional dashboard) from a list of tables |
+
+### UX Components (7)
+
+| Tool | Description |
+|------|-------------|
+| `apex_generate_modal_form(page_id, region_name, table_name, pk_item_name)` | Modal popup form on an existing page without a separate page |
+| `apex_add_master_detail(page_id, master_region_name, master_sql, ...)` | Two linked IRs where detail filters on master row selection |
+| `apex_add_timeline(page_id, region_name, sql_query, date_col, ...)` | Vertical timeline region for audit trails and history |
+| `apex_add_breadcrumb(page_id, entries)` | Add a breadcrumb trail to a page |
+| `apex_add_faceted_search(page_id, region_name, sql_query, facets, ...)` | Faceted search sidebar + Interactive Report for multi-dimensional filtering |
+| `apex_add_chart_drilldown(page_id, chart_region_name, target_item_name, ...)` | Wire a chart click to filter an Interactive Report on the same page |
+| `apex_add_file_upload(page_id, region_name, item_name, table_name, ...)` | File upload item backed by a BLOB column with filename and MIME type |
+
+### DevOps (5)
+
+| Tool | Description |
+|------|-------------|
+| `apex_generate_rest_endpoints(table_name, base_path, require_auth?, ...)` | Generate ORDS REST endpoints: GET/POST collection + GET/PUT/DELETE single row |
+| `apex_export_page(app_id, page_id, output_path?)` | Export a single page as a SQL script |
+| `apex_generate_docs(app_id)` | Auto-generate Markdown documentation for an application |
+| `apex_begin_batch()` | Start batch mode: queue all subsequent PL/SQL for a single DB round-trip |
+| `apex_commit_batch()` | Execute all queued batch operations and return the execution log |
 
 ---
 
-## Demo Apps
+## Code Examples
 
-The `demos/` directory contains three end-to-end build scripts that create real APEX applications. Each script runs in under 60 seconds and creates a fully functional app.
+### 1. Full app from schema in one call
 
-| Script | App ID | Description | Pages | Features Used |
-|--------|--------|-------------|-------|---------------|
-| `build_app200.py` | 200 | Clinic & Therapist Panel | 6 | Login, Dashboard KPIs, 2× CRUD, Nav |
-| `build_app201.py` | 201 | Patient Registry | 5 | Login, Dashboard, CRUD, Validations, Computations, IR |
-| `build_app202.py` | 202 | Admin & Audit | 6 | Login, Dashboard, CRUD, Auth Scheme, AJAX handler, Dynamic Action |
-| `build_app203.py` | 203 | Analytics Dashboard | 4 | JET bar/pie/donut/horizontal charts, gradient & white metric cards, apex_generate_analytics_page |
+```python
+apex_connect()
+apex_create_app(app_id=200, app_name="Order Management")
+apex_generate_login(page_id=101, app_name="Order Management")
 
-Run any demo against your own database:
+# Inspect available tables
+apex_list_tables()
+apex_detect_relationships(["ORDERS", "CUSTOMERS", "ORDER_ITEMS", "PRODUCTS"])
 
-```bash
-# Edit the env vars at the top of the script, then:
-python -X utf8 demos/build_app200.py
-python -X utf8 demos/build_app201.py
-python -X utf8 demos/build_app202.py
+# Generate the entire app: CRUD pages for each table + a dashboard
+apex_generate_from_schema(
+    tables=["ORDERS", "CUSTOMERS", "ORDER_ITEMS", "PRODUCTS"],
+    start_page_id=10,
+    include_dashboard=True
+)
+
+# Add navigation
+apex_add_nav_item("Dashboard", 1, 10, "fa-home")
+apex_add_nav_item("Orders", 10, 20, "fa-shopping-cart")
+apex_add_nav_item("Customers", 20, 30, "fa-users")
+
+apex_finalize_app()
 ```
 
-> **Note:** Use `-X utf8` on Windows to avoid encoding issues with special characters.
+### 2. Analytics page with JET charts
 
----
+```python
+apex_generate_analytics_page(
+    page_id=5,
+    page_name="Analytics",
+    metrics=[
+        {"label": "Total Orders",  "sql": "SELECT COUNT(*) FROM ORDERS",            "icon": "fa-shopping-cart", "color": "#1E88E5"},
+        {"label": "Open Orders",   "sql": "SELECT COUNT(*) FROM ORDERS WHERE STATUS='OPEN'", "icon": "fa-clock",         "color": "#FF9800"},
+        {"label": "Total Revenue", "sql": "SELECT SUM(AMOUNT) FROM ORDERS",          "icon": "fa-dollar",        "color": "#43A047"},
+    ],
+    charts=[
+        {
+            "region_name": "Orders by Status",
+            "chart_type": "pie",
+            "sql_query": "SELECT STATUS LABEL, COUNT(*) VALUE FROM ORDERS GROUP BY STATUS",
+            "color_palette": ["#1E88E5", "#43A047", "#FF9800", "#E53935"]
+        },
+        {
+            "region_name": "Monthly Revenue",
+            "chart_type": "line",
+            "sql_query": "SELECT TO_CHAR(ORDER_DATE,'MM/YYYY') LABEL, SUM(AMOUNT) VALUE FROM ORDERS GROUP BY TO_CHAR(ORDER_DATE,'MM/YYYY') ORDER BY 1"
+        },
+        {
+            "region_name": "Top Customers",
+            "chart_type": "bar_horizontal",
+            "sql_query": "SELECT C.NAME LABEL, COUNT(*) VALUE FROM ORDERS O JOIN CUSTOMERS C ON C.ID=O.CUSTOMER_ID GROUP BY C.NAME ORDER BY 2 DESC FETCH FIRST 10 ROWS ONLY"
+        }
+    ]
+)
+```
 
-## CRUD Generator — How It Works
+### 3. ORDS REST API generation
 
-`apex_generate_crud` automatically:
+```python
+# Generate GET/POST /ords/myschema/orders/ and GET/PUT/DELETE /ords/myschema/orders/:id
+apex_generate_rest_endpoints(
+    table_name="ORDERS",
+    base_path="orders",
+    require_auth=True
+)
 
-1. **Introspects** the table (columns, types, PKs, FKs)
-2. **Infers item types** from naming conventions:
-   - `ID_*` (PK) → Hidden field
-   - `ID_*` (FK) → Select list + auto LOV from parent table
-   - `FL_*` → Yes/No switch
-   - `DT_*` → Date picker (JET)
-   - `DS_*` (> 500 chars) → Textarea
-   - `DS_*` → Text field
-   - `NR_*` → Number field
-   - Audit columns → Skipped automatically
-3. **Creates** an Interactive Report list page with "New" button
-4. **Creates** a form page with all items, Save/Cancel/Delete buttons, and DML process
-5. **Links** the IR to the form via detail link
+# Add a custom query endpoint for reporting
+apex_generate_rest_endpoints(
+    table_name="ORDER_ITEMS",
+    base_path="order-items",
+    require_auth=True
+)
 
-> Works best with Oracle naming conventions (prefixed columns). For other schemas, Claude can adjust item types after generation using `apex_update_item`.
+# Verify the endpoints were registered
+apex_run_sql("SELECT pattern, method FROM user_ords_endpoints WHERE pattern LIKE '/orders%'")
+```
 
----
+### 4. App documentation generation
 
-## APEX 24.2 API — Verified Parameters
+```python
+# Generate full Markdown docs for an existing app
+docs = apex_generate_docs(app_id=200)
 
-All PL/SQL calls were verified against Oracle-supplied APEX 24.2 sample applications. Key differences from older documentation:
+# The output includes:
+#   - App metadata (name, version, theme, auth scheme)
+#   - Page inventory with types and descriptions
+#   - Component breakdown per page (regions, items, processes, DAs)
+#   - Shared components: LOVs, auth schemes, app items
+#   - Navigation structure
+#   - Known issues from apex_validate_app()
 
-### `create_page`
-- Use `p_page_template_options=>'#DEFAULT#'` — **not** `p_page_template_id`
-- `p_step_template=>...` only for **login** pages
-- `p_page_mode=>'MODAL'` only for **modal** pages — omit for normal pages
-- No `p_last_updated_by` / `p_last_upd_yyyymmddhh24miss`
-
-### `create_page_plug` / `create_page_item` / `create_page_process`
-- No `p_flow_id`, `p_page_id`, `p_flow_step_id`, audit columns
-- Autocomplete → `p_tag_attributes=>'autocomplete="username"'` (not `p_attributes=>wwv_flow_t_plugin_attribute_value`)
-- `NATIVE_FORM_DML` requires `p_region_id=>wwv_flow_imp.id(...)` — handles INSERT/UPDATE/DELETE (no separate delete process)
-- No `p_process_success_message` or `p_version_scn` in processes
-
-### `create_page_validation`
-- Type names: `ITEM_NOT_NULL` (not `ITEM_IS_NOT_NULL`), `ITEM_NOT_NULL_OR_ZERO`
-- For `ITEM_NOT_NULL`: item name goes in `p_validation=>'P10_ITEM'` — **not** `p_associated_item`
-- No `p_when_button_pressed` (invalid parameter)
-
-### `create_page_process` (AJAX)
-- `p_process_point=>'ON_DEMAND'` — **not** `'AJAX_CALLBACK'`
-
-### `create_page_da_event` (Dynamic Action)
-- Requires `p_event_sequence=>10`
-- Item trigger: `p_triggering_element_type=>'ITEM'`, `p_triggering_element=>'P20_ITEM'`
-- Omit `p_triggering_condition_type` when there is no condition
-- No `p_fire_on_initialization` or `p_display_when_type` (invalid)
-
-### `create_worksheet` (Interactive Report)
-- `p_show_search_bar=>'Y'` / `'N'` — **not** `'YES'` / `'NO'`
-
-### `create_list_item`
-- No `p_version_scn`
+# You can pipe the output to a file or include it in a wiki
+```
 
 ---
 
@@ -441,33 +362,54 @@ All PL/SQL calls were verified against Oracle-supplied APEX 24.2 sample applicat
 mcp-server/
 ├── pyproject.toml
 └── apex_mcp/
-    ├── server.py          # FastMCP entry point (50 tools)
-    ├── config.py          # Environment variables + defaults
-    ├── db.py              # ConnectionManager singleton (mTLS + auto-reconnect)
-    ├── ids.py             # Session-scoped unique ID generator
-    ├── templates.py       # Universal Theme 42 template IDs
-    ├── session.py         # Import session state tracking
+    ├── server.py           # FastMCP 3.x entry point — 82 tools registered
+    ├── config.py           # Environment variable loading and defaults
+    ├── db.py               # ConnectionManager singleton (mTLS, auto-reconnect)
+    ├── ids.py              # Session-scoped unique ID generator (time-salted)
+    ├── templates.py        # Universal Theme 42 template ID constants
+    ├── session.py          # Import session state: tracks components for cross-referencing
     └── tools/
-        ├── sql_tools.py       # apex_connect, apex_run_sql, apex_status
-        ├── app_tools.py       # apex_create_app, apex_delete_app, ...
-        ├── page_tools.py      # apex_add_page, apex_list_pages
-        ├── component_tools.py # apex_add_region, apex_add_item, ...
-        ├── shared_tools.py    # apex_add_lov, apex_add_auth_scheme, ...
-        ├── schema_tools.py    # apex_list_tables, apex_describe_table
-        ├── generator_tools.py # apex_generate_crud, apex_generate_dashboard, ...
-        ├── js_tools.py        # apex_add_page_js, apex_generate_ajax_handler, ...
-        ├── inspect_tools.py   # apex_get_page_details, apex_update_region, ...
-        ├── user_tools.py      # apex_create_user, apex_list_users
-        └── setup_tools.py     # apex_setup_guide, apex_check_requirements, ...
+        ├── sql_tools.py        # apex_connect, apex_run_sql, apex_status
+        ├── app_tools.py        # apex_create_app, apex_delete_app, apex_export_app, ...
+        ├── page_tools.py       # apex_add_page, apex_list_pages
+        ├── component_tools.py  # apex_add_region, apex_add_item, apex_add_button, ...
+        ├── shared_tools.py     # apex_add_lov, apex_add_auth_scheme, apex_add_nav_item, ...
+        ├── schema_tools.py     # apex_list_tables, apex_describe_table, apex_detect_relationships
+        ├── generator_tools.py  # apex_generate_crud, apex_generate_dashboard, apex_generate_login
+        ├── js_tools.py         # apex_add_page_js, apex_add_global_js, apex_generate_ajax_handler
+        ├── inspect_tools.py    # apex_get_page_details, apex_update_region, apex_diff_app, ...
+        ├── user_tools.py       # apex_create_user, apex_list_users
+        ├── setup_tools.py      # apex_setup_guide, apex_check_requirements, ...
+        ├── validation_tools.py # apex_add_item_validation, apex_add_item_computation
+        ├── visual_tools.py     # apex_add_jet_chart, apex_add_gauge, apex_add_metric_cards, ...
+        ├── advanced_tools.py   # apex_generate_from_schema, apex_generate_wizard, ...
+        └── devops_tools.py     # apex_generate_rest_endpoints, apex_export_page, apex_begin_batch, ...
 ```
 
-### Key Design Decisions
+**Key design points:**
 
-- **mTLS only**: Oracle Autonomous Database requires wallet-based connection (TLS direct mode not supported)
-- **wwv_flow_imp_page.\***: Uses APEX 24.2 import API (not deprecated `wwv_flow_api.*`)
-- **Session tracking**: `session.py` tracks created components to enable cross-referencing (e.g., region ID lookup by name when adding items)
-- **ID generator**: Uses `time.time()`-salted sequential IDs to avoid conflicts with existing APEX components
-- **Auto-reconnect**: `db.ping()` before each operation, reconnects transparently
+- **FastMCP 3.x** — tools registered via `mcp.tool()` decorator, served over stdio for MCP clients
+- **Oracle oracledb thin mode** — mTLS wallet connection; Oracle Instant Client is not required
+- **Session state singleton** — `session.py` tracks created component IDs so later tools can reference regions by name without re-querying the DB
+- **Dry-run mode** — `apex_dry_run_preview(enabled=True)` queues all PL/SQL without executing; returns the full script for review
+- **Batch mode** — `apex_begin_batch()` / `apex_commit_batch()` coalesces multiple operations into a single DB round-trip
+- **Column cache** — table column metadata is cached per session to avoid repeated dictionary queries during CRUD generation
+- **ID generator** — time-salted sequential IDs prevent conflicts with existing APEX component IDs
+
+---
+
+## Requirements
+
+| Requirement | Version |
+|-------------|---------|
+| Python | 3.11+ (3.14 tested) |
+| fastmcp | 3.x |
+| oracledb | 2.x or 3.x (thin mode) |
+| Oracle Instant Client | **Not required** (thin mode) |
+| Oracle APEX | 24.x (24.2 recommended) |
+| Oracle Database | Autonomous Database 23ai or compatible |
+
+The database schema must be the schema associated with your APEX workspace. Most required privileges are granted automatically to workspace-linked schemas. Use `apex_check_permissions()` to verify, and `apex_fix_permissions()` to resolve any gaps.
 
 ---
 
@@ -475,27 +417,14 @@ mcp-server/
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `DPI-1047: Cannot locate a 64-bit Oracle Client` | Old oracledb version | `pip install --upgrade oracledb` (uses thin mode, no client needed) |
-| `ORA-28759: failure to open file` | Wallet path wrong | Point `ORACLE_WALLET_DIR` to the **extracted** folder, not the ZIP |
+| `DPI-1047: Cannot locate a 64-bit Oracle Client` | Outdated oracledb | `pip install --upgrade oracledb` |
+| `ORA-28759: failure to open file` | Wallet path points to ZIP | Set `ORACLE_WALLET_DIR` to the **extracted** folder |
 | `ORA-01017: invalid username/password` | Wrong credentials | Check `ORACLE_DB_USER` and `ORACLE_DB_PASS` |
-| `TNS-03505: Failed to resolve name` | Wrong DSN alias | Open `wallet/tnsnames.ora`, copy an alias name exactly |
-| `ORA-20987: Application does not exist` | Wrong workspace | Check `APEX_WORKSPACE_ID` matches your workspace |
-| `ORA-01031: insufficient privileges` | Missing grants on WWV_ tables | Run the grant script in `apex_check_permissions()` output |
-| `No module named 'apex_mcp'` | Wrong `cwd` in .mcp.json | Set `cwd` to the `mcp-server/` directory |
-| `apex_finalize_app: no active session` | Forgot `apex_create_app` | Always call `apex_create_app()` before adding components |
-
----
-
-## Best Practices Applied by This MCP
-
-- **Naming**: Items prefixed `P{page}_` automatically
-- **AJAX callbacks**: UPPERCASE names (APEX convention)
-- **Authorization**: IS_ prefix schemes (IS_ADMIN, IS_MANAGER)
-- **Sequences**: Multiples of 10 for easy future insertion
-- **Security**: App items use RESTRICTED protection by default
-- **DML**: Delete button shown only when editing existing record (PK not null)
-- **Accessibility**: Required/optional label templates applied correctly
-- **Audit columns**: Auto-excluded from generated forms (DT_CRIACAO, CREATED_ON, etc.)
+| `TNS-03505: Failed to resolve name` | Wrong DSN alias | Open `wallet/tnsnames.ora` and copy an alias exactly |
+| `ORA-20987: Application does not exist` | Wrong workspace ID | Verify `APEX_WORKSPACE_ID` in APEX Admin |
+| `ORA-01031: insufficient privileges` | Missing grants | Run the grant script shown by `apex_check_permissions()` |
+| `No module named 'apex_mcp'` | Wrong `cwd` in `.mcp.json` | Set `cwd` to the `mcp-server/` directory |
+| `apex_finalize_app: no active session` | Forgot `apex_create_app` | Call `apex_create_app()` before adding any component |
 
 ---
 
@@ -505,7 +434,7 @@ mcp-server/
 2. Create a feature branch: `git checkout -b feature/my-tool`
 3. Add your tool in `apex_mcp/tools/`
 4. Register it in `apex_mcp/server.py`
-5. Add docstring with APEX best practices
+5. Include a docstring describing parameters and APEX best practices
 6. Submit a pull request
 
 ---
@@ -516,8 +445,4 @@ MIT License — see [LICENSE](LICENSE)
 
 ---
 
-## About
-
 Built for Oracle APEX 24.2 + Universal Theme 42. Tested with Oracle Autonomous Database 23ai.
-
-Inspired by the [ICHOM TEA project](https://github.com/TechFernandesLTDA) — clinical outcome tracking for ASD patients using APEX.
