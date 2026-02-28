@@ -13,6 +13,16 @@ dependencies = [
     "oracledb>=2.0.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires live Oracle ADB connection",
+    "slow: long-running tests",
+]
+
 [project.scripts]
 apex-mcp = "apex_mcp.server:main"
 

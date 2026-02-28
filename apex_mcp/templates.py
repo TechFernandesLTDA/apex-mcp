@@ -1,9 +1,137 @@
-"""Universal Theme 42 template IDs hardcoded from this APEX workspace.
+"""Universal Theme 42 template IDs for Oracle APEX 24.2.
 
-These IDs are specific to APEX 24.2.13 / Universal Theme 42.
-They reference built-in theme templates and do not change across workspaces
-for the same APEX version.
+The hardcoded IDs below are the defaults for APEX 24.2.13 / Universal Theme 42.
+Call `discover_template_ids()` after connecting to refresh them from the live database.
+This is recommended when running against a different APEX version or workspace.
 """
+from __future__ import annotations
+
+
+def discover_template_ids(db=None) -> dict:
+    """Discover actual template IDs from the connected APEX workspace.
+
+    Queries APEX data dictionary views to find the real template IDs for this
+    workspace and APEX version. Updates module-level constants as a side-effect.
+
+    Args:
+        db: ConnectionManager instance. If None, imports from ..db.
+
+    Returns:
+        dict with discovered IDs (keys match module constant names).
+        Falls back to hardcoded defaults for any template not found.
+
+    Usage:
+        from apex_mcp.db import db
+        apex_connect()
+        from apex_mcp import templates
+        templates.discover_template_ids(db)
+    """
+    global PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN, PAGE_TMPL_DIALOG
+    global REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BLANK, REGION_TMPL_BUTTONS, REGION_TMPL_CARDS
+    global BTN_TMPL_TEXT, BTN_TMPL_ICON
+    global LABEL_OPTIONAL, LABEL_REQUIRED
+    global LIST_TMPL_SIDE_NAV, LIST_TMPL_TOP_NAV, LIST_TMPL_NAVBAR
+    global THEME_STYLE_ID
+
+    if db is None:
+        try:
+            from .db import db as _db
+            db = _db
+        except Exception:
+            return {}
+
+    if not db.is_connected():
+        return {}
+
+    discovered: dict = {}
+
+    try:
+        # Page templates
+        rows = db.execute("""
+            SELECT template_name, template_id
+              FROM apex_application_templates
+             WHERE theme_number = 42
+               AND template_type = 'PAGE'
+               AND template_name IN ('Standard', 'Login', 'Modal Dialog')
+        """)
+        for r in rows:
+            name = r.get("TEMPLATE_NAME", "")
+            tid = r.get("TEMPLATE_ID")
+            if tid and "Standard" in name:
+                PAGE_TMPL_STANDARD = tid
+                discovered["PAGE_TMPL_STANDARD"] = tid
+            elif tid and "Login" in name:
+                PAGE_TMPL_LOGIN = tid
+                discovered["PAGE_TMPL_LOGIN"] = tid
+            elif tid and "Dialog" in name:
+                PAGE_TMPL_DIALOG = tid
+                discovered["PAGE_TMPL_DIALOG"] = tid
+
+        # Region templates
+        rows = db.execute("""
+            SELECT template_name, template_id
+              FROM apex_application_templates
+             WHERE theme_number = 42
+               AND template_type = 'REGION'
+               AND template_name IN ('Standard', 'Interactive Report', 'Blank with Attributes',
+                                     'Buttons Container', 'Cards')
+        """)
+        for r in rows:
+            name = r.get("TEMPLATE_NAME", "")
+            tid = r.get("TEMPLATE_ID")
+            if tid and name == "Standard":
+                REGION_TMPL_STANDARD = tid
+                discovered["REGION_TMPL_STANDARD"] = tid
+            elif tid and "Interactive Report" in name:
+                REGION_TMPL_IR = tid
+                discovered["REGION_TMPL_IR"] = tid
+            elif tid and "Blank" in name:
+                REGION_TMPL_BLANK = tid
+                discovered["REGION_TMPL_BLANK"] = tid
+            elif tid and "Buttons" in name:
+                REGION_TMPL_BUTTONS = tid
+                discovered["REGION_TMPL_BUTTONS"] = tid
+            elif tid and "Cards" in name:
+                REGION_TMPL_CARDS = tid
+                discovered["REGION_TMPL_CARDS"] = tid
+
+        # Theme style (Redwood Light)
+        rows = db.execute("""
+            SELECT theme_style_id
+              FROM apex_application_theme_styles
+             WHERE theme_number = 42
+               AND theme_style_name LIKE '%Redwood%'
+               AND rownum = 1
+        """)
+        if rows:
+            THEME_STYLE_ID = rows[0].get("THEME_STYLE_ID", THEME_STYLE_ID)
+            discovered["THEME_STYLE_ID"] = THEME_STYLE_ID
+
+        # List templates
+        rows = db.execute("""
+            SELECT template_name, template_id
+              FROM apex_application_templates
+             WHERE theme_number = 42
+               AND template_type = 'LIST'
+               AND template_name IN ('Side Navigation Menu', 'Top Navigation Menu', 'Navigation Bar')
+        """)
+        for r in rows:
+            name = r.get("TEMPLATE_NAME", "")
+            tid = r.get("TEMPLATE_ID")
+            if tid and "Side" in name:
+                LIST_TMPL_SIDE_NAV = tid
+                discovered["LIST_TMPL_SIDE_NAV"] = tid
+            elif tid and "Top" in name:
+                LIST_TMPL_TOP_NAV = tid
+                discovered["LIST_TMPL_TOP_NAV"] = tid
+            elif tid and "Navigation Bar" in name:
+                LIST_TMPL_NAVBAR = tid
+                discovered["LIST_TMPL_NAVBAR"] = tid
+
+    except Exception:
+        pass  # Keep hardcoded fallbacks on any error
+
+    return discovered
 
 # ── Page Templates ────────────────────────────────────────────────────────────
 PAGE_TMPL_STANDARD    = 4072355960268175073

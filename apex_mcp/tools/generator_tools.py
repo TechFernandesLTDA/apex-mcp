@@ -183,6 +183,7 @@ def apex_generate_crud(
         pk_columns: set[str] = {r["COLUMN_NAME"] for r in pk_rows}
         pk_list: list[str] = [r["COLUMN_NAME"] for r in pk_rows]
         primary_key = pk_list[0] if pk_list else (col_names[0] if col_names else "ID")
+        pk_type = "composite" if len(pk_list) > 1 else "simple"
 
         # ── 3. FKs ────────────────────────────────────────────────────────
         fk_rows = db.execute("""
@@ -278,11 +279,20 @@ wwv_flow_imp_page.create_page(
         log.append(f"List page {list_page_id} created")
 
         # ── 7. Create IR region on list page ─────────────────────────────
-        # Build edit link: clicking a row opens the form page
-        edit_link = (
-            f"f?p=&APP_ID.:{form_page_id}:&SESSION.::&DEBUG.::"
-            f"P{form_page_id}_{primary_key}:#ROWID#"
-        )
+        # Build edit link: clicking a row opens the form page.
+        # For composite PKs, pass all PK items in the URL (names:values CSV).
+        if pk_type == "composite":
+            pk_item_names = ",".join(f"P{form_page_id}_{pk}" for pk in pk_list)
+            pk_item_vals = ",".join(f"#{pk}#" for pk in pk_list)
+            edit_link = (
+                f"f?p=&APP_ID.:{form_page_id}:&SESSION.::&DEBUG.::"
+                f"{pk_item_names}:{pk_item_vals}"
+            )
+        else:
+            edit_link = (
+                f"f?p=&APP_ID.:{form_page_id}:&SESSION.::&DEBUG.::"
+                f"P{form_page_id}_{primary_key}:#ROWID#"
+            )
 
         ir_region_id = ids.next(f"ir_region_{list_page_id}")
 

@@ -640,6 +640,9 @@ def apex_add_dynamic_action(
     affected_element: str = "",
     sequence: int = 10,
     fire_on_init: bool = False,
+    false_action_type: str = "",
+    false_javascript_code: str = "",
+    false_affected_element: str = "",
 ) -> str:
     """Add a Dynamic Action (client-side event handler) to a page.
 
@@ -654,7 +657,7 @@ def apex_add_dynamic_action(
             - "custom": Custom jQuery event
         trigger_element: Item name, button name, or jQuery selector that triggers the DA.
                          Leave empty for page-level events (page-load).
-        action_type: What the DA does:
+        action_type: What the DA does (TRUE branch):
             - "execute_javascript": Run JavaScript code (use javascript_code param)
             - "submit_page": Submit the page
             - "set_value": Set an item value
@@ -664,17 +667,27 @@ def apex_add_dynamic_action(
             - "disable": Disable item
             - "refresh": Refresh a region
             - "plsql": Execute PL/SQL (use plsql_code param) — runs via AJAX
-        javascript_code: JavaScript to execute. Has access to apex.item(), apex.server.process().
-        plsql_code: PL/SQL for action_type="plsql".
-        affected_element: Item or region name affected by the action.
+        javascript_code: JavaScript to execute (TRUE branch). Has access to apex.item(), apex.server.process().
+        plsql_code: PL/SQL for action_type="plsql" (TRUE branch).
+        affected_element: Item or region name affected by the action (TRUE branch).
         sequence: Order of execution.
         fire_on_init: Also fire when page first loads.
+        false_action_type: Action type for the FALSE branch (same values as action_type).
+                           When provided, a FALSE branch action is created alongside the TRUE branch.
+                           Example: use action_type="show" and false_action_type="hide" for
+                           conditional show/hide based on a condition expression.
+        false_javascript_code: JavaScript code for the FALSE branch
+                               (used when false_action_type="execute_javascript").
+        false_affected_element: Item or region name affected by the FALSE branch action.
 
     Best practices:
         - Use page-load DAs to initialize page state (show/hide based on conditions)
         - Use change DAs on select lists to cascade filters
         - Keep JavaScript minimal — prefer apex.item() and apex.server.process()
         - AJAX DAs with plsql should reference named APEX items via :ITEM_NAME bind vars
+        - For conditional show/hide: set action_type="show", false_action_type="hide",
+          and use the same affected_element / false_affected_element for symmetric behavior.
+          Example: show P10_DETAIL when P10_TYPE = 'DETAIL', hide it otherwise.
     """
     if not db.is_connected():
         return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
@@ -749,6 +762,18 @@ wwv_flow_imp_page.create_page_da_event(
 ,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
+        # JS sanitization — warn about unsafe patterns in development context
+        js_warnings = []
+        if javascript_code:
+            if "eval(" in javascript_code:
+                js_warnings.append(
+                    "Warning: eval() detected in JavaScript code. Consider using safer alternatives."
+                )
+            if "document.write(" in javascript_code:
+                js_warnings.append(
+                    "Warning: document.write() detected. Use DOM manipulation APIs instead."
+                )
+
         # Build action attribute lines based on action type
         action_attr_lines = ""
         if action_lower == "execute_javascript" and javascript_code:
@@ -770,7 +795,7 @@ wwv_flow_imp_page.create_page_da_event(
                     f"\n,p_affected_region_id=>'{_esc(affected_element)}'"
                 )
 
-        # Create the DA action
+        # Create the DA action (TRUE branch)
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_da_action(
  p_id=>wwv_flow_imp.id({da_act_id})
@@ -785,6 +810,43 @@ wwv_flow_imp_page.create_page_da_action(
 ,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
 
+        # Create the DA action (FALSE branch) — only when false_action_type is provided
+        if false_action_type:
+            false_action_lower = false_action_type.lower()
+            false_apex_action = action_map.get(false_action_lower, "NATIVE_JAVASCRIPT_CODE")
+            da_false_act_id = ids.next(f"da_false_act_{page_id}_{_esc(da_name)}")
+
+            false_action_attr_lines = ""
+            if false_action_lower == "execute_javascript" and false_javascript_code:
+                false_action_attr_lines = f",p_attribute_01=>'{_esc(false_javascript_code)}'"
+
+            false_affected_lines = ""
+            if false_affected_element:
+                if false_affected_element.upper().startswith("P") and "_" in false_affected_element:
+                    false_affected_lines = (
+                        f",p_affected_elements_type=>'ITEM'"
+                        f"\n,p_affected_elements=>'{_esc(false_affected_element)}'"
+                    )
+                else:
+                    false_affected_lines = (
+                        f",p_affected_elements_type=>'REGION'"
+                        f"\n,p_affected_region_id=>'{_esc(false_affected_element)}'"
+                    )
+
+            db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_da_action(
+ p_id=>wwv_flow_imp.id({da_false_act_id})
+,p_event_id=>wwv_flow_imp.id({da_id})
+,p_event_result=>'FALSE'
+,p_action_sequence=>{sequence}
+,p_execute_on_page_init=>'{("Y" if fire_on_init else "N")}'
+,p_action=>'{false_apex_action}'
+{false_action_attr_lines}
+{false_affected_lines}
+,p_last_updated_by=>'APEX_MCP'
+,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+);"""))
+
         return json.dumps({
             "status": "ok",
             "da_id": da_id,
@@ -795,6 +857,8 @@ wwv_flow_imp_page.create_page_da_action(
             "trigger_element": trigger_element or None,
             "affected_element": affected_element or None,
             "fire_on_init": fire_on_init,
+            "has_false_branch": bool(false_action_type),
+            "warnings": js_warnings,
             "message": f"Dynamic Action '{da_name}' added to page {page_id}.",
         }, ensure_ascii=False, indent=2)
 

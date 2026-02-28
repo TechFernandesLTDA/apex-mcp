@@ -35,17 +35,26 @@ def apex_connect(
 
     mTLS is required for Oracle Autonomous Database (TLS direct mode may not work).
     """
-    result = db.connect(
-        user=user,
-        password=password,
-        dsn=dsn,
-        wallet_dir=wallet_dir,
-        wallet_pass=wallet_password,
-    )
-    return result
+    try:
+        msg = db.connect(
+            user=user,
+            password=password,
+            dsn=dsn,
+            wallet_dir=wallet_dir,
+            wallet_pass=wallet_password,
+        )
+        # Auto-discover template IDs from the live workspace (#11)
+        try:
+            from .. import templates as _tmpl
+            _tmpl.discover_template_ids(db)
+        except Exception:
+            pass
+        return json.dumps({"status": "ok", "message": msg}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
 
 
-def apex_run_sql(sql: str, max_rows: int = 100) -> str:
+def apex_run_sql(sql: str, max_rows: int = 100, bind_params: dict | None = None) -> str:
     """Execute an arbitrary SELECT query or PL/SQL anonymous block against the database.
 
     Args:
@@ -53,6 +62,9 @@ def apex_run_sql(sql: str, max_rows: int = 100) -> str:
              For SELECT: returns rows as JSON array.
              For PL/SQL: executes and returns 'OK' or error message.
         max_rows: Maximum rows to return for SELECT (default 100, max 1000).
+        bind_params: Optional dict of bind variables (e.g., {"id": 42, "name": "John"}).
+                     Use :variable_name in SQL and pass values here to prevent SQL injection.
+                     Example: apex_run_sql("SELECT * FROM my_table WHERE id = :id", bind_params={"id": 42})
 
     Returns:
         JSON array of row objects for SELECT, or status string for DML/PL/SQL.
@@ -60,26 +72,31 @@ def apex_run_sql(sql: str, max_rows: int = 100) -> str:
     Examples:
         apex_run_sql("SELECT table_name FROM user_tables ORDER BY 1")
         apex_run_sql("SELECT * FROM tea_beneficiarios WHERE rownum <= 5")
+        apex_run_sql("SELECT * FROM tea_beneficiarios WHERE id_beneficiario = :id", bind_params={"id": 1})
         apex_run_sql("BEGIN dbms_output.put_line('hello'); END;")
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     sql_stripped = sql.strip().upper()
     is_select = sql_stripped.startswith("SELECT") or sql_stripped.startswith("WITH")
 
     if is_select:
-        max_rows = min(max_rows, 1000)
-        rows = db.execute(sql)
-        if len(rows) > max_rows:
-            rows = rows[:max_rows]
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        try:
+            max_rows = min(max_rows, 1000)
+            rows = db.execute(sql, bind_params or {})
+            if len(rows) > max_rows:
+                rows = rows[:max_rows]
+            return json.dumps({"status": "ok", "rows": rows, "count": len(rows)},
+                              default=str, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
     else:
         try:
-            db.plsql(sql)
-            return "OK"
+            db.plsql(sql, bind_params or {})
+            return json.dumps({"status": "ok", "message": "PL/SQL executed successfully."})
         except Exception as e:
-            return f"ERROR: {e}"
+            return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
 
 
 def apex_status() -> str:

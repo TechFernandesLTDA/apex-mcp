@@ -236,11 +236,13 @@ def apex_generate_ajax_handler(
     plsql_code: str,
     input_items: list[str] | None = None,
     return_json: bool = True,
+    auto_add_js: bool = True,
 ) -> str:
     """Generate an AJAX callback (PL/SQL process + JavaScript caller).
 
     Creates a server-side AJAX endpoint (PL/SQL process) and returns the
-    JavaScript code to call it from the client side.
+    JavaScript code to call it from the client side. By default, the generated
+    JavaScript function is automatically added to the page via apex_add_page_js().
 
     Args:
         page_id: Page that owns this callback.
@@ -263,6 +265,10 @@ def apex_generate_ajax_handler(
         input_items: List of page item names to send to server
                      (e.g., ["P10_SEARCH", "P10_STATUS"]).
         return_json: Whether the callback returns JSON (default True).
+        auto_add_js: Automatically add the generated JavaScript caller function to the page
+                     via apex_add_page_js() (default True). When True, the function will be
+                     available at runtime without any additional steps. Set to False if you
+                     want to manually review and modify the JS before adding it to the page.
 
     Returns:
         JSON with:
@@ -271,6 +277,8 @@ def apex_generate_ajax_handler(
         - callback_name: the callback name registered
         - javascript_caller: JavaScript code snippet to call this callback
         - usage_example: Complete example showing how to use it
+        - js_auto_added: bool — whether the JS was automatically added to the page
+        - js_add_error: error message if auto-add failed, None otherwise
 
     The generated JavaScript:
         function call{CamelCaseName}() {
@@ -410,12 +418,20 @@ wwv_flow_imp_page.create_page_process(
             f"// Or call from a button click handler:\n"
             f"apex.jQuery('#MY_BUTTON').on('click', function() {{\n"
             f"    {js_func_name}();\n"
-            f"}});\n\n"
-            f"// Or use apex_add_page_js() to add the function to page {page_id}:\n"
-            f"// apex_add_page_js(page_id={page_id}, javascript_code=<the function above>)"
+            f"}});"
         )
 
-        return json.dumps({
+        # Auto-add the generated JS caller to the page if requested
+        js_added = False
+        js_add_error = None
+        if auto_add_js:
+            js_result_str = apex_add_page_js(page_id=page_id, javascript_code=javascript_caller)
+            js_result = json.loads(js_result_str)
+            js_added = js_result.get("status") == "ok"
+            if not js_added:
+                js_add_error = js_result.get("error")
+
+        result = {
             "status": "ok",
             "page_id": page_id,
             "callback_name": upper_callback,
@@ -423,11 +439,18 @@ wwv_flow_imp_page.create_page_process(
             "process_created": True,
             "javascript_caller": javascript_caller,
             "usage_example": usage_example,
-            "tip": (
+            "js_auto_added": js_added,
+            "js_add_error": js_add_error,
+        }
+
+        # Include manual tip only when JS was not auto-added
+        if not js_added:
+            result["tip"] = (
                 f"Use apex_add_page_js(page_id={page_id}, javascript_code=...) "
                 f"to add the generated function to the page so it is available at runtime."
-            ),
-        }, ensure_ascii=False, indent=2)
+            )
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)

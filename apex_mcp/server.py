@@ -61,12 +61,15 @@ from .tools.inspect_tools import (
     apex_delete_page,
     apex_delete_region,
     apex_copy_page,
+    apex_diff_app,
 )
 from .tools.setup_tools import (
     apex_setup_guide,
     apex_check_requirements,
     apex_check_permissions,
+    apex_fix_permissions,
 )
+from .tools.validation_tools import apex_add_item_validation, apex_add_item_computation
 
 # ── Server definition ─────────────────────────────────────────────────────────
 mcp = FastMCP(
@@ -132,6 +135,7 @@ Access it at: f?p={app_id}  (relative to your APEX base URL)
 mcp.tool()(apex_setup_guide)
 mcp.tool()(apex_check_requirements)
 mcp.tool()(apex_check_permissions)
+mcp.tool()(apex_fix_permissions)
 
 # Connection & session
 mcp.tool()(apex_connect)
@@ -194,6 +198,11 @@ mcp.tool()(apex_update_item)
 mcp.tool()(apex_delete_page)
 mcp.tool()(apex_delete_region)
 mcp.tool()(apex_copy_page)
+mcp.tool()(apex_diff_app)
+
+# Validations & computations
+mcp.tool()(apex_add_item_validation)
+mcp.tool()(apex_add_item_computation)
 
 
 def main():

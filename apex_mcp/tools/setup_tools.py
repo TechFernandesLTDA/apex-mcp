@@ -413,3 +413,81 @@ BEGIN
 END;
 /""".format(user=DB_USER),
     }, ensure_ascii=False, indent=2)
+
+
+def apex_fix_permissions() -> str:
+    """Attempt to grant the permissions required for inspect/edit operations on APEX internal tables.
+
+    Tries to execute GRANT statements for UPDATE/DELETE on WWV_FLOW_PAGE_PLUGS,
+    WWV_FLOW_STEP_ITEMS, and WWV_FLOW_STEPS for the currently connected user.
+
+    Note: GRANTs on WWV_FLOW_* tables must be executed by ADMIN or SYS.
+    If this fails with insufficient privileges, ask your DBA to run the grant
+    script manually (the grant_script field in the response contains the exact SQL).
+
+    Returns:
+        JSON with:
+        - current_user: the schema running this command
+        - grants: list of {statement, status, error} for each GRANT attempted
+        - grant_script: the manual SQL to run as ADMIN/SYS if needed
+        - summary: overall outcome message
+
+    Requires:
+        - Active database connection (call apex_connect first)
+    """
+    if not db.is_connected():
+        return json.dumps({
+            "status": "error",
+            "error": "Not connected. Call apex_connect() first.",
+        }, ensure_ascii=False, indent=2)
+
+    try:
+        current_user_rows = db.execute("SELECT USER FROM DUAL")
+        current_user = current_user_rows[0]["USER"] if current_user_rows else DB_USER
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "error": f"Could not determine current user: {e}",
+        }, ensure_ascii=False, indent=2)
+
+    grant_statements = [
+        f"GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO {current_user}",
+        f"GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_STEP_ITEMS TO {current_user}",
+        f"GRANT SELECT, DELETE ON WWV_FLOW_STEPS TO {current_user}",
+    ]
+
+    grants_result = []
+    for stmt in grant_statements:
+        entry: dict = {"statement": stmt}
+        try:
+            db.plsql(stmt)
+            entry["status"] = "ok"
+        except Exception as e:
+            entry["status"] = "error"
+            entry["error"] = str(e)
+        grants_result.append(entry)
+
+    successful = [g for g in grants_result if g["status"] == "ok"]
+    failed = [g for g in grants_result if g["status"] == "error"]
+
+    grant_script = "\n".join(grant_statements) + "\n"
+
+    if not failed:
+        summary = f"All {len(grants_result)} grants applied successfully for user {current_user}."
+    elif not successful:
+        summary = (
+            f"All {len(grants_result)} grants failed (insufficient privileges). "
+            f"Ask your DBA (ADMIN/SYS) to run the grant_script manually."
+        )
+    else:
+        summary = (
+            f"{len(successful)} grant(s) applied, {len(failed)} failed. "
+            f"Ask your DBA to run the failed statements manually."
+        )
+
+    return json.dumps({
+        "current_user": current_user,
+        "grants": grants_result,
+        "grant_script": grant_script,
+        "summary": summary,
+    }, ensure_ascii=False, indent=2)

@@ -225,23 +225,27 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
              ORDER BY display_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
-        # Items
+        # Items — JOIN with regions to avoid N+1 per-region queries
         items = db.execute("""
-            SELECT item_name,
-                   label           AS item_label,
-                   display_as      AS item_type,
-                   item_sequence   AS sequence,
-                   region,
-                   item_default    AS default_value,
-                   process_value_column AS source_column,
-                   format_mask,
-                   lov_definition,
-                   item_is_persistent,
-                   placeholder
-              FROM apex_application_page_items
-             WHERE application_id = :app_id
-               AND page_id = :page_id
-             ORDER BY item_sequence
+            SELECT i.item_name,
+                   i.label                     AS item_label,
+                   i.display_as                AS item_type,
+                   i.item_sequence             AS sequence,
+                   r.region_name               AS region,
+                   i.item_default              AS default_value,
+                   i.process_value_column      AS source_column,
+                   i.format_mask,
+                   i.lov_definition,
+                   i.item_is_persistent,
+                   i.placeholder
+              FROM apex_application_page_items i
+              LEFT JOIN apex_application_page_regions r
+                     ON r.application_id = i.application_id
+                    AND r.page_id        = i.page_id
+                    AND r.region_id      = i.region_id
+             WHERE i.application_id = :app_id
+               AND i.page_id = :page_id
+             ORDER BY i.item_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
         # Buttons
@@ -279,20 +283,55 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
              ORDER BY process_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
-        # Dynamic Actions
-        da_events = db.execute("""
-            SELECT dynamic_action_name,
-                   event,
-                   triggering_element,
-                   triggering_element_type,
-                   condition_type,
-                   condition_expression1,
-                   fire_on_page_load
-              FROM apex_application_page_da
-             WHERE application_id = :app_id
-               AND page_id = :page_id
-             ORDER BY dynamic_action_name
+        # Dynamic Actions — single JOIN query; group actions per event in Python
+        # to eliminate N+1 (one query per DA event for its actions).
+        da_rows = db.execute("""
+            SELECT e.dynamic_action_name,
+                   e.event              AS triggering_event,
+                   e.triggering_element,
+                   e.triggering_element_type,
+                   e.condition_type,
+                   e.condition_expression1,
+                   e.fire_on_page_load,
+                   a.action,
+                   a.event_result,
+                   a.action_sequence    AS action_seq,
+                   a.attribute_01
+              FROM apex_application_page_da_events e
+              JOIN apex_application_page_da_actions a
+                ON a.application_id    = e.application_id
+               AND a.page_id           = e.page_id
+               AND a.da_event_id       = e.dynamic_action_id
+             WHERE e.application_id = :app_id
+               AND e.page_id = :page_id
+             ORDER BY e.dynamic_action_name, a.event_result, a.action_sequence
         """, {"app_id": app_id, "page_id": page_id})
+
+        # Group DA rows into a list of event objects each with nested actions[]
+        _da_seen: dict = {}
+        _da_ordered: list = []
+        for _r in da_rows:
+            _name = _r.get("DYNAMIC_ACTION_NAME") or _r.get("dynamic_action_name", "")
+            if _name not in _da_seen:
+                _event_obj = {
+                    "dynamic_action_name": _name,
+                    "triggering_event": _r.get("TRIGGERING_EVENT") or _r.get("triggering_event"),
+                    "triggering_element": _r.get("TRIGGERING_ELEMENT") or _r.get("triggering_element"),
+                    "triggering_element_type": _r.get("TRIGGERING_ELEMENT_TYPE") or _r.get("triggering_element_type"),
+                    "condition_type": _r.get("CONDITION_TYPE") or _r.get("condition_type"),
+                    "condition_expression1": _r.get("CONDITION_EXPRESSION1") or _r.get("condition_expression1"),
+                    "fire_on_page_load": _r.get("FIRE_ON_PAGE_LOAD") or _r.get("fire_on_page_load"),
+                    "actions": [],
+                }
+                _da_seen[_name] = _event_obj
+                _da_ordered.append(_event_obj)
+            _da_seen[_name]["actions"].append({
+                "action": _r.get("ACTION") or _r.get("action"),
+                "event_result": _r.get("EVENT_RESULT") or _r.get("event_result"),
+                "sequence": _r.get("ACTION_SEQ") or _r.get("action_seq"),
+                "attribute_01": _r.get("ATTRIBUTE_01") or _r.get("attribute_01"),
+            })
+        da_events = _da_ordered
 
         # Computations
         computations = db.execute("""
@@ -1233,6 +1272,221 @@ def apex_copy_page(
                 f"copied to page {target_page_id} '{resolved_name}' in app {target_app_id}."
             ),
         }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# DIFF / COMPARISON TOOLS
+# ---------------------------------------------------------------------------
+
+
+def apex_diff_app(app_id_1: int, app_id_2: int) -> str:
+    """Compare two APEX applications and return their differences.
+
+    Compares pages, regions, and items between two apps in the same workspace.
+    Useful for tracking changes between dev/homolog/prod environments or app versions.
+
+    Args:
+        app_id_1: First application ID (base).
+        app_id_2: Second application ID (compare target).
+
+    Returns:
+        JSON with diff summary:
+        {
+          "app_1": {id, name, pages},
+          "app_2": {id, name, pages},
+          "diff": {
+            "pages": {
+              "only_in_app_1": [...],
+              "only_in_app_2": [...],
+              "in_both": [...]
+            },
+            "regions": {
+              "only_in_app_1": [...],  # [{page_id, region_name}]
+              "only_in_app_2": [...],
+              "in_both_count": N
+            },
+            "items": {
+              "only_in_app_1": [...],  # [{page_id, item_name}]
+              "only_in_app_2": [...],
+              "in_both_count": N
+            }
+          }
+        }
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    try:
+        # --- 1. Basic app info for both apps ---
+        def _get_app_info(app_id: int) -> dict | None:
+            rows = db.execute("""
+                SELECT application_id,
+                       application_name,
+                       pages AS page_count
+                  FROM apex_applications
+                 WHERE application_id = :app_id
+            """, {"app_id": app_id})
+            return rows[0] if rows else None
+
+        info_1 = _get_app_info(app_id_1)
+        info_2 = _get_app_info(app_id_2)
+
+        if info_1 is None:
+            return json.dumps({
+                "status": "error",
+                "error": f"Application {app_id_1} not found."
+            })
+        if info_2 is None:
+            return json.dumps({
+                "status": "error",
+                "error": f"Application {app_id_2} not found."
+            })
+
+        def _val(row: dict, *keys):
+            """Return first non-None value from row using case-insensitive key lookup."""
+            for k in keys:
+                v = row.get(k.upper()) or row.get(k.lower())
+                if v is not None:
+                    return v
+            return None
+
+        # --- 2. Pages ---
+        def _get_pages(app_id: int) -> list[dict]:
+            return db.execute("""
+                SELECT page_id, page_name
+                  FROM apex_application_pages
+                 WHERE application_id = :app_id
+                 ORDER BY page_id
+            """, {"app_id": app_id})
+
+        pages_1_rows = _get_pages(app_id_1)
+        pages_2_rows = _get_pages(app_id_2)
+
+        pages_1_map: dict[int, str] = {
+            int(_val(r, "page_id")): (_val(r, "page_name") or "")
+            for r in pages_1_rows
+        }
+        pages_2_map: dict[int, str] = {
+            int(_val(r, "page_id")): (_val(r, "page_name") or "")
+            for r in pages_2_rows
+        }
+
+        pages_1_ids = set(pages_1_map.keys())
+        pages_2_ids = set(pages_2_map.keys())
+
+        pages_only_1 = [
+            {"page_id": pid, "page_name": pages_1_map[pid]}
+            for pid in sorted(pages_1_ids - pages_2_ids)
+        ]
+        pages_only_2 = [
+            {"page_id": pid, "page_name": pages_2_map[pid]}
+            for pid in sorted(pages_2_ids - pages_1_ids)
+        ]
+        pages_both = [
+            {"page_id": pid, "page_name_app_1": pages_1_map[pid], "page_name_app_2": pages_2_map[pid]}
+            for pid in sorted(pages_1_ids & pages_2_ids)
+        ]
+
+        # --- 3. Regions ---
+        def _get_regions(app_id: int) -> list[dict]:
+            return db.execute("""
+                SELECT page_id, region_name
+                  FROM apex_application_page_regions
+                 WHERE application_id = :app_id
+                 ORDER BY page_id, region_name
+            """, {"app_id": app_id})
+
+        regions_1_rows = _get_regions(app_id_1)
+        regions_2_rows = _get_regions(app_id_2)
+
+        def _region_key(r: dict) -> tuple:
+            return (int(_val(r, "page_id")), (_val(r, "region_name") or "").upper())
+
+        regions_1_set = {_region_key(r) for r in regions_1_rows}
+        regions_2_set = {_region_key(r) for r in regions_2_rows}
+
+        regions_only_1 = [
+            {"page_id": k[0], "region_name": k[1]}
+            for k in sorted(regions_1_set - regions_2_set)
+        ]
+        regions_only_2 = [
+            {"page_id": k[0], "region_name": k[1]}
+            for k in sorted(regions_2_set - regions_1_set)
+        ]
+        regions_both_count = len(regions_1_set & regions_2_set)
+
+        # --- 4. Items — normalize name by stripping P{n}_ prefix ---
+        def _get_items(app_id: int) -> list[dict]:
+            return db.execute("""
+                SELECT page_id, item_name
+                  FROM apex_application_page_items
+                 WHERE application_id = :app_id
+                 ORDER BY page_id, item_name
+            """, {"app_id": app_id})
+
+        import re as _re
+        _prefix_pat = _re.compile(r'^P\d+_', _re.IGNORECASE)
+
+        def _normalize_item(item_name: str) -> str:
+            """Strip the P{n}_ prefix so P10_NAME and P20_NAME compare as equal."""
+            return _prefix_pat.sub("", item_name).upper()
+
+        items_1_rows = _get_items(app_id_1)
+        items_2_rows = _get_items(app_id_2)
+
+        def _item_key(r: dict) -> tuple:
+            raw = (_val(r, "item_name") or "")
+            return (int(_val(r, "page_id")), _normalize_item(raw))
+
+        items_1_set = {_item_key(r) for r in items_1_rows}
+        items_2_set = {_item_key(r) for r in items_2_rows}
+
+        items_only_1 = [
+            {"page_id": k[0], "item_name": k[1]}
+            for k in sorted(items_1_set - items_2_set)
+        ]
+        items_only_2 = [
+            {"page_id": k[0], "item_name": k[1]}
+            for k in sorted(items_2_set - items_1_set)
+        ]
+        items_both_count = len(items_1_set & items_2_set)
+
+        # --- Build result ---
+        result = {
+            "status": "ok",
+            "app_1": {
+                "id": app_id_1,
+                "name": _val(info_1, "application_name"),
+                "pages": int(_val(info_1, "page_count") or 0),
+            },
+            "app_2": {
+                "id": app_id_2,
+                "name": _val(info_2, "application_name"),
+                "pages": int(_val(info_2, "page_count") or 0),
+            },
+            "diff": {
+                "pages": {
+                    "only_in_app_1": pages_only_1,
+                    "only_in_app_2": pages_only_2,
+                    "in_both": pages_both,
+                },
+                "regions": {
+                    "only_in_app_1": regions_only_1,
+                    "only_in_app_2": regions_only_2,
+                    "in_both_count": regions_both_count,
+                },
+                "items": {
+                    "only_in_app_1": items_only_1,
+                    "only_in_app_2": items_only_2,
+                    "in_both_count": items_both_count,
+                },
+            },
+        }
+
+        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
