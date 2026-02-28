@@ -902,7 +902,43 @@ def apex_validate_app(app_id: int | None = None) -> str:
                 f"({row['SOURCE_TYPE']}) has no SQL source."
             )
 
-        # ── 4. Summary counts ─────────────────────────────────────────────────
+        # ── 4. Home page existence check ─────────────────────────────────────
+        # apex_applications stores the home page as HOME_LINK, e.g.
+        # "f?p=&APP_ID.:50:&APP_SESSION.::&DEBUG.:::" — parse the page segment.
+        home_page_rows = db.execute("""
+            SELECT home_link
+              FROM apex_applications
+             WHERE application_id = :app_id
+        """, {"app_id": effective_app_id})
+        if home_page_rows:
+            home_link = home_page_rows[0].get("HOME_LINK") or ""
+            # Extract the page ID from f?p=&APP_ID.:<page_id>:...
+            home_page_id = None
+            try:
+                parts = home_link.split(":")
+                if len(parts) >= 2:
+                    raw_page = parts[1].strip()
+                    if raw_page.isdigit():
+                        home_page_id = int(raw_page)
+            except Exception:
+                home_page_id = None
+
+            if home_page_id is not None:
+                home_exists = db.execute("""
+                    SELECT COUNT(*) AS cnt
+                      FROM apex_application_pages
+                     WHERE application_id = :app_id
+                       AND page_id = :home_page_id
+                """, {"app_id": effective_app_id, "home_page_id": home_page_id})
+                home_count = home_exists[0].get("CNT", 0) if home_exists else 0
+                if int(home_count) == 0:
+                    issues.append(
+                        f"Home page (page {home_page_id}) does not exist in the application. "
+                        f"APEX will redirect to a non-existent page, causing HTTP 404. "
+                        f"Create page {home_page_id} or change the home page in App Attributes."
+                    )
+
+        # ── 5. Summary counts ─────────────────────────────────────────────────
         totals = db.execute("""
             SELECT
               (SELECT COUNT(*) FROM apex_application_pages

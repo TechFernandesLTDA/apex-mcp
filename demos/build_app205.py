@@ -186,7 +186,7 @@ def run():
 
     # ── 3. Criar app ──────────────────────────────────────────────────────────
     section("[3] Criar app")
-    if not ok(f"apex_create_app({APP_ID})", apex_create_app(APP_ID, APP_NAME))[0]:
+    if not ok(f"apex_create_app({APP_ID})", apex_create_app(APP_ID, APP_NAME, home_page=50))[0]:
         return
 
     # ── 4. Login (página 101) ─────────────────────────────────────────────────

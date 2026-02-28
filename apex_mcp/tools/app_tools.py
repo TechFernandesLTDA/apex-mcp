@@ -352,13 +352,27 @@ wwv_flow_imp_shared.create_user_interface(
         session.workspace_id = WORKSPACE_ID
         session.import_begun = True
 
-        return json.dumps({
+        result: dict = {
             "status": "ok",
             "app_id": app_id,
             "app_name": app_name,
+            "home_page": home_page,
             "next_step": "Use apex_add_page() to add pages, then apex_finalize_app() when done.",
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        }
+
+        # Warn if home_page is not yet registered in session pages.
+        # At create time, pages haven't been added yet, so always warn when home_page != 1
+        # to remind the caller to create the home page.  After pages are added (during
+        # finalize), the check in apex_validate_app catches stragglers.
+        if home_page not in session.pages:
+            result["warning"] = (
+                f"home_page={home_page} is not yet in the registered pages. "
+                f"Make sure to call apex_add_page({home_page}, ...) before apex_finalize_app(), "
+                f"otherwise the app will redirect to a non-existent page and return HTTP 404."
+            )
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
         # Cleanup: try to end any partial import session
