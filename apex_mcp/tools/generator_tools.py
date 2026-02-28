@@ -536,9 +536,19 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_redirect_url=>'{_esc(cancel_url)}'
 );"""))
 
-        # Delete button (conditional: only shown when PK is not null)
+        # Delete button (conditional: only shown when ALL PK items are not null)
         delete_btn_id = ids.next(f"btn_delete_{form_page_id}")
         pk_item = f"P{form_page_id}_{primary_key}"
+        if pk_type == "composite":
+            # For composite PKs, use a PL/SQL expression that checks every PK item
+            pk_not_null_expr = " AND ".join(
+                f":P{form_page_id}_{pk} IS NOT NULL" for pk in pk_list
+            )
+            delete_condition_type = "PLSQL_EXPRESSION"
+            delete_condition_value = pk_not_null_expr
+        else:
+            delete_condition_type = "ITEM_IS_NOT_NULL"
+            delete_condition_value = pk_item
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({delete_btn_id})
@@ -553,8 +563,8 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_is_hot=>'N'
 ,p_button_image_alt=>'Delete'
 ,p_button_position=>'EDIT'
-,p_button_condition_type=>'ITEM_IS_NOT_NULL'
-,p_button_condition=>'{_esc(pk_item)}'
+,p_button_condition_type=>'{delete_condition_type}'
+,p_button_condition=>'{_esc(delete_condition_value)}'
 ,p_confirm_message=>'Would you like to delete this record?'
 );"""))
 
@@ -676,9 +686,12 @@ wwv_flow_imp_page.create_page_da_event(
             "pages_created": [list_page_id, form_page_id],
             "items_created": items_created,
             "lovs_created": lovs_created,
+            "pk_columns": pk_list,
+            "pk_type": pk_type,
             "summary": {
                 "columns_found": len(cols),
-                "pk_columns": list(pk_columns),
+                "pk_columns": pk_list,
+                "pk_type": pk_type,
                 "fk_columns": list(fk_columns),
                 "items_on_form": len(items_created),
                 "lovs": len(lovs_created),
@@ -767,8 +780,45 @@ wwv_flow_imp_page.create_page(
         )
         log.append(f"Dashboard page {page_id} created")
 
-        # ── KPI cards container region ────────────────────────────────────
+        # ── KPI cards: single PL/SQL region with UT42 Cards grid layout ──
+        # All KPI cards are rendered inside one NATIVE_PLSQL region using
+        # Universal Theme 42 classes (t-Cards, t-Card, t-Card-wrap, etc.)
+        # without any inline styles — colors use u-color-N utility classes.
         kpi_container_id = ids.next(f"kpi_container_{page_id}")
+
+        # Build the complete PL/SQL source for all KPI cards in one block.
+        # Each card emits a <li class="t-Cards-item"> with the proper UT42 markup.
+        kpi_lines: list[str] = []
+        kpi_lines.append("DECLARE")
+        kpi_lines.append("  v_val VARCHAR2(200);")
+        kpi_lines.append("BEGIN")
+        kpi_lines.append("  sys.htp.p('<ul class=\"t-Cards t-Cards--featured t-Cards--animColorFill"
+                         " t-Cards--displayIcons t-Cards--cols apex-cards-region\">');\n")
+        for idx, kpi in enumerate(kpi_queries, start=1):
+            kpi_title = kpi.get("title", f"KPI {idx}")
+            kpi_sql   = kpi.get("sql",   "SELECT 0 FROM dual")
+            kpi_icon  = kpi.get("icon",  "fa-info")
+            kpi_color = kpi.get("color", f"u-color-{idx}")
+            kpi_lines.append(f"  -- KPI {idx}: {kpi_title}")
+            kpi_lines.append( "  BEGIN")
+            kpi_lines.append(f"    EXECUTE IMMEDIATE '{_esc(kpi_sql)}' INTO v_val;")
+            kpi_lines.append( "  EXCEPTION WHEN OTHERS THEN v_val := 'N/A'; END;")
+            kpi_lines.append( "  sys.htp.p('<li class=\"t-Cards-item\">');\n"
+                              "  sys.htp.p('<div class=\"t-Card\">');\n"
+                              "  sys.htp.p('<div class=\"t-Card-wrap\">');\n"
+                             f"  sys.htp.p('<div class=\"t-Card-icon {kpi_color}\">'||\n"
+                             f"            '<span class=\"t-Icon {kpi_icon}\"></span></div>');\n"
+                              "  sys.htp.p('<div class=\"t-Card-titleWrap\">');\n"
+                             f"  sys.htp.p('<h3 class=\"t-Card-title\">'||APEX_ESCAPE.HTML('{_esc(kpi_title)}')||'</h3>');\n"
+                              "  sys.htp.p('<p class=\"t-Card-value\">'||APEX_ESCAPE.HTML(v_val)||'</p>');\n"
+                              "  sys.htp.p('</div>');\n"  # titleWrap
+                              "  sys.htp.p('</div>');\n"  # t-Card-wrap
+                              "  sys.htp.p('</div>');\n"  # t-Card
+                              "  sys.htp.p('</li>');")
+        kpi_lines.append("  sys.htp.p('</ul>');")
+        kpi_lines.append("END;")
+        kpi_plsql_source = "\n".join(kpi_lines)
+
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({kpi_container_id})
@@ -779,61 +829,18 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_template=>{REGION_TMPL_BLANK}
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
-,p_last_updated_by=>'APEX_MCP'
-,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
-);"""))
-        log.append("KPI container region created")
-
-        # ── Individual KPI PL/SQL dynamic content regions ─────────────────
-        for idx, kpi in enumerate(kpi_queries, start=1):
-            kpi_title = kpi.get("title", f"KPI {idx}")
-            kpi_sql = kpi.get("sql", "SELECT 0 FROM dual")
-            kpi_icon = kpi.get("icon", "fa-info")
-            kpi_color = kpi.get("color", f"u-color-{idx}")
-
-            # PL/SQL block that queries the value and emits HTML
-            plsql_source = (
-                f"DECLARE\n"
-                f"  v_val VARCHAR2(100);\n"
-                f"BEGIN\n"
-                f"  BEGIN\n"
-                f"    EXECUTE IMMEDIATE '{_esc(kpi_sql)}' INTO v_val;\n"
-                f"  EXCEPTION WHEN OTHERS THEN v_val := 'N/A'; END;\n"
-                f"  sys.htp.p('<div class=\"t-Card\">');\n"
-                f"  sys.htp.p('<a href=\"#\" class=\"t-Card-wrap\">');\n"
-                f"  sys.htp.p('<div class=\"t-Card-icon {kpi_color}\">'||"
-                f"'<span class=\"t-Icon {kpi_icon}\"></span></div>');\n"
-                f"  sys.htp.p('<div class=\"t-Card-titleWrap\">'||"
-                f"'<h3 class=\"t-Card-title\">'||APEX_ESCAPE.HTML('{_esc(kpi_title)}')||'</h3>'||"
-                f"'<h4 class=\"t-Card-subtitle\">'||APEX_ESCAPE.HTML(v_val)||'</h4></div>');\n"
-                f"  sys.htp.p('</a></div>');\n"
-                f"END;"
-            )
-
-            kpi_region_id = ids.next(f"kpi_region_{page_id}_{idx}")
-            db.plsql(_blk(f"""
-wwv_flow_imp_page.create_page_plug(
- p_id=>wwv_flow_imp.id({kpi_region_id})
-,p_flow_id=>wwv_flow.g_flow_id
-,p_page_id=>{page_id}
-,p_plug_name=>'{_esc(kpi_title)}'
-,p_parent_plug_id=>wwv_flow_imp.id({kpi_container_id})
-,p_region_template_options=>'#DEFAULT#:t-Card--noPadding:t-Region--hideHeader'
-,p_plug_template=>{REGION_TMPL_BLANK}
-,p_plug_display_sequence=>{idx * 10}
-,p_plug_display_point=>'BODY'
-,p_plug_source=>'{_esc(plsql_source)}'
+,p_plug_source=>'{_esc(kpi_plsql_source)}'
 ,p_plug_source_type=>'NATIVE_PLSQL'
 ,p_last_updated_by=>'APEX_MCP'
 ,p_last_upd_yyyymmddhh24miss=>TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
 );"""))
-            session.regions[kpi_region_id] = RegionInfo(
-                region_id=kpi_region_id,
-                page_id=page_id,
-                region_name=kpi_title,
-                region_type="NATIVE_PLSQL",
-            )
-        log.append(f"KPI card regions created: {len(kpi_queries)}")
+        session.regions[kpi_container_id] = RegionInfo(
+            region_id=kpi_container_id,
+            page_id=page_id,
+            region_name="KPI Cards",
+            region_type="NATIVE_PLSQL",
+        )
+        log.append(f"KPI cards region created ({len(kpi_queries)} cards, UT42 t-Cards layout)")
 
         # ── IR region at the bottom ───────────────────────────────────────
         ir_region_id = ids.next(f"ir_region_{page_id}")

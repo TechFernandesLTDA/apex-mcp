@@ -95,7 +95,7 @@ def apex_setup_guide() -> str:
             },
             "APEX_WORKSPACE_ID": {
                 "description": "Numeric ID of your APEX workspace",
-                "example": "8822816515098715",
+                "example": "1234567890123456",
                 "required": True,
                 "how_to_find": "APEX Admin Console > Manage Workspaces > click workspace name > see Workspace ID in URL or details page",
             },
@@ -334,10 +334,18 @@ def apex_check_permissions() -> str:
 
     def check_exec(package_name: str) -> bool:
         try:
-            # Try to describe the package (won't execute, just checks privileges)
-            db.execute(f"SELECT object_type FROM all_objects WHERE object_name = '{package_name}' AND object_type = 'PACKAGE'")
-            db.execute(f"SELECT 1 FROM dual WHERE EXISTS (SELECT 1 FROM user_tab_privs WHERE table_name = '{package_name}' AND privilege = 'EXECUTE')")
-            return True
+            # Check direct grants (user_tab_privs) and role-based grants (role_tab_privs)
+            rows = db.execute(
+                "SELECT 1 FROM user_tab_privs WHERE table_name = :pkg AND privilege = 'EXECUTE'",
+                {"pkg": package_name},
+            )
+            if not rows:
+                # Also check grants made to PUBLIC or via roles (all_tab_privs includes these)
+                rows = db.execute(
+                    "SELECT 1 FROM all_tab_privs WHERE table_name = :pkg AND privilege = 'EXECUTE' AND rownum = 1",
+                    {"pkg": package_name},
+                )
+            return len(rows) > 0
         except Exception:
             return False
 

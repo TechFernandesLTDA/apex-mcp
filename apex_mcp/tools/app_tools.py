@@ -63,7 +63,7 @@ def apex_create_app(
     login_page: int = 101,
     home_page: int = 1,
     schema: str = APEX_SCHEMA,
-    language: str = "pt-br",
+    language: str = "en",
     date_format: str = "DD/MM/YYYY",
     auth_type: str = "NATIVE_APEX_ACCOUNTS",
 ) -> str:
@@ -89,9 +89,12 @@ def apex_create_app(
         app_alias: URL alias (e.g., "MY-APP"). Auto-generated from app_name if omitted.
         login_page: Page ID for the login page (default 101).
         home_page: Page ID for the home/dashboard (default 1).
-        schema: Database schema owner (default: APEX_SCHEMA env or TEA_APP).
-        language: Application primary language (default: pt-br).
-        date_format: Date display format (default: DD/MM/YYYY).
+        schema: Database schema owner (from APEX_SCHEMA env var).
+        language: Application primary language code (default: "en").
+            Common values: "en" (English), "pt-br" (Brazilian Portuguese),
+            "es" (Spanish), "fr" (French), "de" (German).
+        date_format: Oracle date display format (default: "DD/MM/YYYY").
+            Common values: "MM/DD/YYYY" (US), "DD/MM/YYYY" (EU/BR), "YYYY-MM-DD" (ISO).
         auth_type: Authentication scheme type. Options:
             - NATIVE_APEX_ACCOUNTS (default): APEX user accounts
             - NATIVE_CUSTOM_AUTH: custom PL/SQL function
@@ -108,7 +111,7 @@ def apex_create_app(
         - For ADB: user must be the APEX workspace schema or have equivalent grants
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     alias = app_alias or app_name.upper().replace(" ", "-")
     log: list[str] = []
@@ -362,11 +365,11 @@ def apex_finalize_app() -> str:
         JSON with status and the APEX URL to access the application.
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return "No import session active. Call apex_create_app() first."
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if session.import_ended:
-        return "Import already finalized."
+        return json.dumps({"status": "error", "error": "Import already finalized. Call apex_create_app() to start a new session."})
 
     try:
         db.plsql("begin wwv_flow_imp.import_end(p_auto_install_sup_obj=>nvl(wwv_flow_application_install.get_auto_install_sup_obj,false)); end;")
@@ -402,7 +405,7 @@ def apex_delete_app(app_id: int) -> str:
         - User must own the application or have APEX admin privileges
     """
     if not db.is_connected():
-        return "Not connected. Call apex_connect() first."
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         db.plsql(_blk(f"""
@@ -448,8 +451,8 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
     Args:
         app_id: Numeric application ID to export (e.g., 100).
         output_path: Full file path where the SQL export should be saved
-            (e.g., "C:/Projetos/Apex/apex/f100.sql"). If empty, only the first
-            4000 characters are returned as a preview in the JSON response.
+            (e.g., "C:/myproject/apex/f100.sql"). If empty, only the first
+            500 characters are returned as a preview in the JSON response.
 
     Returns:
         JSON with keys:
@@ -467,11 +470,11 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
         - For ADB: the schema user must be the workspace owner or have equivalent grants
 
     Example:
-        apex_export_app(100, "C:/Projetos/Apex/apex/f100.sql")
-        # Saves f100.sql and returns a preview of the first 500 chars.
+        apex_export_app(100, "C:/myproject/apex/f100.sql")
+        # Saves the complete f100.sql and returns a 500-char preview.
 
         apex_export_app(100)
-        # Returns only the first 4000 chars as preview (no file saved).
+        # Returns only the first 500 chars as preview (no file saved).
     """
     if not db.is_connected():
         return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})

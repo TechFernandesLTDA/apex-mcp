@@ -16,7 +16,7 @@ def apex_connect(
     """Connect to Oracle Autonomous Database via mTLS wallet.
 
     Args:
-        user: Database username (default: from ORACLE_DB_USER env or TEA_APP)
+        user: Database username (from ORACLE_DB_USER env var — required)
         password: Database password (default: from ORACLE_DB_PASS env)
         dsn: TNS alias from tnsnames.ora inside the wallet (default: from ORACLE_DSN env)
         wallet_dir: Path to the directory containing the Oracle wallet files (default: from ORACLE_WALLET_DIR env)

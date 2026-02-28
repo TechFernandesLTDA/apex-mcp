@@ -11,7 +11,7 @@
 
 ## What is this?
 
-**apex-mcp** is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **45 tools** for building Oracle APEX applications through AI. Instead of navigating the APEX App Builder UI, you describe what you want and Claude Code does the work.
+**apex-mcp** is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **50 tools** for building Oracle APEX applications through AI. Instead of navigating the APEX App Builder UI, you describe what you want and Claude Code does the work.
 
 ```
 "Create a CRUD for the EMPLOYEES table on pages 10 and 11, then add it to the nav menu"
@@ -26,16 +26,17 @@
 
 | Category | Tools | Description |
 |----------|-------|-------------|
-| **Setup & Diagnostics** | 3 | Connection guide, requirements check, permission audit |
+| **Setup & Diagnostics** | 4 | Connection guide, requirements check, permission audit, fix grants |
 | **Connection** | 3 | Connect to ADB, run SQL, check session state |
-| **App Lifecycle** | 4 | Create/delete/list/finalize apps |
+| **App Lifecycle** | 5 | Create/delete/list/finalize/export apps |
 | **Pages** | 2 | Add pages (blank, form, report, login, dashboard, modal) |
 | **Components** | 5 | Regions, items, buttons, processes, dynamic actions |
 | **Shared Components** | 5 | LOVs, auth schemes, nav items, app items, app processes |
-| **Schema Introspection** | 2 | List tables, describe table (columns, PKs, FKs) |
+| **Schema Introspection** | 2 | List tables, describe table (columns, PKs, FKs, sequences) |
 | **Generators** | 3 | Auto-generate CRUD, dashboard, login page |
 | **JavaScript** | 3 | Page JS, global JS, AJAX handler generator |
-| **Inspection & Editing** | 13 | Read/update/delete existing app components |
+| **Inspection & Editing** | 14 | Read/update/delete/diff existing app components |
+| **Validations & Computations** | 2 | Item validations, item computations |
 | **User Management** | 2 | Create/list APEX workspace users |
 
 ---
@@ -126,7 +127,7 @@ pip install -e .
 /mcp
 ```
 
-You should see `apex-dev` with **45 tools**. If not, run `apex_check_requirements()` to diagnose.
+You should see `apex-dev` with **50 tools**. If not, run `apex_check_requirements()` to diagnose.
 
 ---
 
@@ -349,7 +350,7 @@ Access your app at: `f?p=200` (relative to your APEX base URL)
 mcp-server/
 ├── pyproject.toml
 └── apex_mcp/
-    ├── server.py          # FastMCP entry point (45 tools)
+    ├── server.py          # FastMCP entry point (50 tools)
     ├── config.py          # Environment variables + defaults
     ├── db.py              # ConnectionManager singleton (mTLS + auto-reconnect)
     ├── ids.py             # Session-scoped unique ID generator

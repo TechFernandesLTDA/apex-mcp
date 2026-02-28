@@ -56,6 +56,15 @@ def apex_add_page(
         return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
         return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+    if page_id in session.pages:
+        existing = session.pages[page_id]
+        return json.dumps({
+            "status": "error",
+            "error": (
+                f"Page {page_id} already exists in this session ('{existing.page_name}'). "
+                "Use a different page_id or call apex_delete_page() first."
+            ),
+        })
 
     try:
         page_alias = page_name.upper().replace(" ", "-")

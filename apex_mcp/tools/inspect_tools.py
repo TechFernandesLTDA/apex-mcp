@@ -10,6 +10,7 @@ in APEX App Builder after any update or delete operation.
 from __future__ import annotations
 import json
 from ..db import db
+from ..config import DB_USER
 from ..config import WORKSPACE_ID
 
 
@@ -704,8 +705,8 @@ def apex_update_region(
                 "status": "error",
                 "error": (
                     f"Region '{region_name}' not found on page {page_id} of app {app_id}. "
-                    "Tip: if TEA_APP does not have UPDATE on WWV_FLOW_PAGE_PLUGS, grant it as ADMIN: "
-                    "GRANT UPDATE ON APEX_240200.WWV_FLOW_PAGE_PLUGS TO TEA_APP;"
+                    f"Tip: if {DB_USER} does not have UPDATE on WWV_FLOW_PAGE_PLUGS, run as ADMIN: "
+                    f"GRANT UPDATE ON WWV_FLOW_PAGE_PLUGS TO {DB_USER};"
                 )
             })
 
@@ -777,8 +778,8 @@ def apex_update_region(
         hint = ""
         if "ORA-01031" in err_msg or "insufficient privileges" in err_msg.lower():
             hint = (
-                " Hint: Grant UPDATE privilege as ADMIN: "
-                "GRANT UPDATE ON APEX_240200.WWV_FLOW_PAGE_PLUGS TO TEA_APP;"
+                f" Hint: Grant UPDATE privilege as ADMIN: "
+                f"GRANT UPDATE ON WWV_FLOW_PAGE_PLUGS TO {DB_USER};"
             )
         return json.dumps({
             "status": "error",
@@ -850,8 +851,8 @@ def apex_update_item(
                 "status": "error",
                 "error": (
                     f"Item '{item_name}' not found on page {page_id} of app {app_id}. "
-                    "Tip: if TEA_APP does not have UPDATE on WWV_FLOW_STEP_ITEMS, grant it as ADMIN: "
-                    "GRANT UPDATE ON APEX_240200.WWV_FLOW_STEP_ITEMS TO TEA_APP;"
+                    f"Tip: if {DB_USER} does not have UPDATE on WWV_FLOW_STEP_ITEMS, run as ADMIN: "
+                    f"GRANT UPDATE ON WWV_FLOW_STEP_ITEMS TO {DB_USER};"
                 )
             })
 
@@ -936,8 +937,8 @@ def apex_update_item(
         hint = ""
         if "ORA-01031" in err_msg or "insufficient privileges" in err_msg.lower():
             hint = (
-                " Hint: Grant UPDATE privilege as ADMIN: "
-                "GRANT UPDATE ON APEX_240200.WWV_FLOW_STEP_ITEMS TO TEA_APP;"
+                f" Hint: Grant UPDATE privilege as ADMIN: "
+                f"GRANT UPDATE ON WWV_FLOW_STEP_ITEMS TO {DB_USER};"
             )
         return json.dumps({
             "status": "error",
@@ -1159,9 +1160,9 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
         hint = ""
         if "ORA-01031" in err_msg or "insufficient privileges" in err_msg.lower():
             hint = (
-                " Hint: Grant DELETE privilege as ADMIN: "
-                "GRANT DELETE ON APEX_240200.WWV_FLOW_PAGE_PLUGS TO TEA_APP; "
-                "GRANT DELETE ON APEX_240200.WWV_FLOW_STEP_ITEMS TO TEA_APP;"
+                f" Hint: Grant DELETE privilege as ADMIN: "
+                f"GRANT DELETE ON WWV_FLOW_PAGE_PLUGS TO {DB_USER}; "
+                f"GRANT DELETE ON WWV_FLOW_STEP_ITEMS TO {DB_USER};"
             )
         return json.dumps({
             "status": "error",
