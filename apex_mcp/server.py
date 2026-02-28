@@ -94,6 +94,7 @@ from .tools.advanced_tools import (
     apex_generate_wizard,
     apex_add_notification_region,
     apex_add_page_css,
+    apex_add_global_css,
     apex_add_interactive_grid,
     apex_bulk_add_items,
     apex_validate_app,
@@ -387,6 +388,7 @@ mcp.tool()(apex_generate_report_page)
 mcp.tool()(apex_generate_wizard)
 mcp.tool()(apex_add_notification_region)
 mcp.tool()(apex_add_page_css)
+mcp.tool()(apex_add_global_css)
 mcp.tool()(apex_add_interactive_grid)
 mcp.tool()(apex_bulk_add_items)
 mcp.tool()(apex_validate_app)

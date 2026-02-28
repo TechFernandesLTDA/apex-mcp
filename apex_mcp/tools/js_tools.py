@@ -89,38 +89,51 @@ def apex_add_page_js(
         })
 
     try:
-        # Build the script tag content
-        file_includes = ""
+        # Use NATIVE_PLSQL + sys.htp.p() to inject the <script> tag.
+        # NATIVE_STATIC can render the tag as escaped text depending on the
+        # region template's "Escape Special Characters" setting.
+        #
+        # Escaping strategy — two levels:
+        #   Level 1: _esc(javascript_code)  → escapes ' → '' for the inner
+        #            PL/SQL string literal (the sys.htp.p argument).
+        #   Level 2: _esc(stored_plsql)     → escapes the whole PL/SQL block
+        #            for embedding in the outer create_page_plug string literal.
+        js_esc = _esc(javascript_code)  # level 1
+
+        # Build the PL/SQL block that will be stored in p_plug_source.
         if js_file_urls.strip():
+            file_lines = ""
             for url in js_file_urls.strip().splitlines():
                 url = url.strip()
                 if url:
-                    file_includes += (
-                        f'<script src="{url}" type="text/javascript"></script>\n'
+                    file_lines += (
+                        f"  sys.htp.p('<script src=\"{url}\""
+                        f" type=\"text/javascript\"></script>');\n"
                     )
-
-        # The static HTML source: external file includes + inline script
-        script_html = (
-            f"{file_includes}"
-            f"<script type=\"text/javascript\">\n"
-            f"{javascript_code}\n"
-            f"</script>"
-        )
+            stored_plsql = (
+                f"begin\n"
+                f"{file_lines}"
+                f"  sys.htp.p('<script type=\"text/javascript\">\n{js_esc}\n</script>');\n"
+                f"end;"
+            )
+        else:
+            stored_plsql = (
+                f"begin"
+                f" sys.htp.p('<script type=\"text/javascript\">\n{js_esc}\n</script>');"
+                f" end;"
+            )
 
         region_id = ids.next(f"js_region_{page_id}_{ids.next()}")
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
 ,p_plug_name=>'Page JavaScript'
-,p_region_template_options=>'#DEFAULT#'
 ,p_plug_template=>{REGION_TMPL_BLANK}
 ,p_plug_display_sequence=>9999
 ,p_plug_display_point=>'BODY'
-,p_plug_source=>'{_esc(script_html)}'
-,p_plug_source_type=>'NATIVE_STATIC'
+,p_plug_source=>'{_esc(stored_plsql)}'
+,p_plug_source_type=>'NATIVE_PLSQL'
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
-,p_attribute_01=>'N'
-,p_attribute_02=>'HTML'
 );"""))
 
         return json.dumps({

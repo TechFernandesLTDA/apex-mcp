@@ -563,36 +563,29 @@ wwv_flow_imp_page.create_page_item(
 
         log.append(f"Form items created: {len(items_created)}")
 
-        # ── 13. Buttons region on form page ───────────────────────────────
-        btn_region_id = ids.next(f"btn_region_{form_page_id}")
-        db.plsql(_blk(f"""
-wwv_flow_imp_page.create_page_plug(
- p_id=>wwv_flow_imp.id({btn_region_id})
-,p_plug_name=>'Buttons'
-,p_region_template_options=>'#DEFAULT#'
-,p_plug_template=>2126429139436695430
-,p_plug_display_sequence=>20
-,p_plug_display_point=>'REGION_POSITION_03'
-);"""))
-
+        # ── 13. Buttons inside the form region ────────────────────────────
+        # Using CLOSE/DELETE/CREATE positions within the form region is more
+        # reliable than a separate region at REGION_POSITION_03, which only
+        # renders on dialog/modal page templates, not standard pages.
         cancel_url = f"f?p=&APP_ID.:{list_page_id}:&SESSION.::&DEBUG.:::"
 
-        # Cancel button
+        # Cancel button — CLOSE position (left side of region footer)
         cancel_btn_id = ids.next(f"btn_cancel_{form_page_id}")
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({cancel_btn_id})
 ,p_button_sequence=>10
-,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
+,p_button_plug_id=>wwv_flow_imp.id({form_region_id})
 ,p_button_name=>'CANCEL'
 ,p_button_action=>'REDIRECT_URL'
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'N'
 ,p_button_image_alt=>'Cancel'
-,p_button_position=>'EDIT'
+,p_button_position=>'CLOSE'
 ,p_button_redirect_url=>'{_esc(cancel_url)}'
 );"""))
+        session.buttons[f"{form_page_id}:CANCEL"] = cancel_btn_id
 
         # Delete button (conditional: only shown when ALL PK items are not null)
         delete_btn_id = ids.next(f"btn_delete_{form_page_id}")
@@ -611,34 +604,36 @@ wwv_flow_imp_page.create_page_button(
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({delete_btn_id})
 ,p_button_sequence=>20
-,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
+,p_button_plug_id=>wwv_flow_imp.id({form_region_id})
 ,p_button_name=>'DELETE'
 ,p_button_action=>'SUBMIT'
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'N'
 ,p_button_image_alt=>'Delete'
-,p_button_position=>'EDIT'
+,p_button_position=>'DELETE'
 ,p_button_condition_type=>'{delete_condition_type}'
 ,p_button_condition=>'{_esc(delete_condition_value)}'
 ,p_confirm_message=>'Would you like to delete this record?'
 );"""))
+        session.buttons[f"{form_page_id}:DELETE"] = delete_btn_id
 
-        # Save button (hot)
+        # Save button (hot, right side — CREATE position)
         save_btn_id = ids.next(f"btn_save_{form_page_id}")
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({save_btn_id})
 ,p_button_sequence=>30
-,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
+,p_button_plug_id=>wwv_flow_imp.id({form_region_id})
 ,p_button_name=>'SAVE'
 ,p_button_action=>'SUBMIT'
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'Y'
 ,p_button_image_alt=>'Save'
-,p_button_position=>'EDIT'
+,p_button_position=>'CREATE'
 );"""))
+        session.buttons[f"{form_page_id}:SAVE"] = save_btn_id
         log.append("Form buttons created (Cancel, Delete, Save)")
 
         # ── 14. DML process on form page ──────────────────────────────────

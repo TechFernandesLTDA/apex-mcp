@@ -293,11 +293,11 @@ wwv_flow_imp_page.create_page(
     .wizard-header{{padding:16px 0 20px;}}
     .wizard-steps{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}}
     .wizard-step{{flex:1;text-align:center;font-size:.75rem;padding:6px 4px;border-radius:4px;
-      background:#f1f5f9;color:#64748b;}}
-    .wizard-step.done{{background:#dcfce7;color:#166534;}}
-    .wizard-step.active{{background:#3b82f6;color:#fff;font-weight:600;}}
-    .wizard-progress{{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;}}
-    .wizard-progress-bar{{height:100%;background:#3b82f6;border-radius:3px;
+      background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;}}
+    .wizard-step.done{{background:#E8F5E9;color:#2E7D32;border-color:#A5D6A7;}}
+    .wizard-step.active{{background:#00995D;color:#fff;font-weight:700;border-color:#006B3F;}}
+    .wizard-progress{{height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin-top:8px;}}
+    .wizard-progress-bar{{height:100%;background:linear-gradient(90deg,#00995D,#43A047);border-radius:4px;
       transition:width .4s ease;width:{pct}%;}}
   </style>');
   sys.htp.p('<div class="wizard-header">');
@@ -325,7 +325,7 @@ wwv_flow_imp_page.create_page_plug(
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({form_region_id})
 ,p_plug_name=>'{_esc(step_title)}'
-,p_region_template_options=>'#DEFAULT#'
+,p_region_template_options=>'#DEFAULT#:t-Region--accent1'
 ,p_plug_template=>{REGION_TMPL_STANDARD}
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
@@ -369,54 +369,62 @@ wwv_flow_imp_page.create_page_item(
                 session.items[item_name] = ItemInfo(item_id=item_id, page_id=page_id, item_name=item_name, item_type=item_type)
                 all_items.append(item_name)
 
-            # Buttons
-            btn_region_id = ids.next(f"btn_region_{page_id}")
-            db.plsql(_blk(f"""
-wwv_flow_imp_page.create_page_plug(
- p_id=>wwv_flow_imp.id({btn_region_id})
-,p_plug_name=>'Buttons'
-,p_region_template_options=>'#DEFAULT#'
-,p_plug_template=>2126429139436695430
-,p_plug_display_sequence=>20
-,p_plug_display_point=>'REGION_POSITION_03'
-);"""))
-
+            # Buttons — placed inside the form region using PREVIOUS/NEXT positions.
+            # REGION_POSITION_03 only renders on dialog/modal page templates, not
+            # standard pages, so buttons there are invisible. Placing them in the
+            # form region footer is the reliable approach for standard pages.
             if not is_first:
                 prev_btn_id = ids.next(f"btn_prev_{page_id}")
                 db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({prev_btn_id})
 ,p_button_sequence=>10
-,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
+,p_button_plug_id=>wwv_flow_imp.id({form_region_id})
 ,p_button_name=>'PREVIOUS'
 ,p_button_action=>'REDIRECT_URL'
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'N'
-,p_button_image_alt=>'Previous'
-,p_button_position=>'EDIT'
+,p_button_image_alt=>'< Anterior'
+,p_button_position=>'PREVIOUS'
 ,p_button_redirect_url=>'f?p=&APP_ID.:{prev_page}:&SESSION.::&DEBUG.:::'
 );"""))
+                session.buttons[f"{page_id}:PREVIOUS"] = prev_btn_id
 
             next_btn_id = ids.next(f"btn_next_{page_id}")
-            next_label = "Finish" if is_last else "Next"
-            next_hot = is_last
+            next_label = "Concluir >" if is_last else "Proximo >"
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({next_btn_id})
 ,p_button_sequence=>20
-,p_button_plug_id=>wwv_flow_imp.id({btn_region_id})
+,p_button_plug_id=>wwv_flow_imp.id({form_region_id})
 ,p_button_name=>'NEXT'
-,p_button_action=>'{"SUBMIT" if is_last else "REDIRECT_URL"}'
+,p_button_action=>'SUBMIT'
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
-,p_button_is_hot=>'{"Y" if next_hot else "Y"}'
+,p_button_is_hot=>'Y'
 ,p_button_image_alt=>'{next_label}'
-,p_button_position=>'EDIT'
-{f",p_button_redirect_url=>'f?p=&APP_ID.:{next_page}:&SESSION.::&DEBUG.:::'" if not is_last else ""}
+,p_button_position=>'NEXT'
 );"""))
+            session.buttons[f"{page_id}:NEXT"] = next_btn_id
 
-            if is_last:
+            if not is_last:
+                # Page branch: after the form submits and saves session state,
+                # redirect to the next wizard step.
+                branch_id = ids.next(f"branch_{page_id}")
+                db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_branch(
+ p_id=>wwv_flow_imp.id({branch_id})
+,p_branch_name=>'Ir para etapa {step_idx + 2}'
+,p_branch_action=>'f?p=&APP_ID.:{next_page}:&SESSION.::&DEBUG.:::'
+,p_branch_point=>'AFTER_PROCESSING'
+,p_branch_type=>'REDIRECT_URL'
+,p_branch_sequence=>10
+,p_branch_condition_type=>'PLSQL_EXPRESSION'
+,p_branch_condition=>':REQUEST = ''NEXT'''
+);"""))
+            else:
+                # Last step: clear cache for target page, then redirect there.
                 redir_proc_id = ids.next(f"proc_redir_{page_id}")
                 db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
@@ -428,6 +436,18 @@ wwv_flow_imp_page.create_page_process(
 ,p_attribute_01=>'CLEAR_CACHE_FOR_PAGES'
 ,p_attribute_02=>'{finish_page}'
 ,p_error_display_location=>'INLINE_IN_NOTIFICATION'
+);"""))
+                branch_id = ids.next(f"branch_{page_id}")
+                db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_branch(
+ p_id=>wwv_flow_imp.id({branch_id})
+,p_branch_name=>'Concluir wizard'
+,p_branch_action=>'f?p=&APP_ID.:{finish_page}:&SESSION.::&DEBUG.:::'
+,p_branch_point=>'AFTER_PROCESSING'
+,p_branch_type=>'REDIRECT_URL'
+,p_branch_sequence=>10
+,p_branch_condition_type=>'PLSQL_EXPRESSION'
+,p_branch_condition=>':REQUEST = ''NEXT'''
 );"""))
 
             log.append(f"Step {step_idx+1}: page {page_id} '{step_title}' created ({len(step_items)} items)")
@@ -613,6 +633,87 @@ wwv_flow_imp_page.create_page_plug(
         return json.dumps({
             "status": "ok", "page_id": page_id,
             "message": f"CSS injected into page {page_id} ({len(css_code)} chars).",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# apex_add_global_css
+# ---------------------------------------------------------------------------
+
+def apex_add_global_css(css_code: str) -> str:
+    """Add CSS that applies to ALL pages via the APEX Global Page (Page 0).
+
+    Creates Page 0 (Global Page) if it doesn't exist, then adds a hidden
+    PL/SQL region that injects a <style> block on every page of the application.
+
+    This is the recommended way to apply app-wide styles — branding, theme
+    overrides, component styles — rather than repeating apex_add_page_css()
+    on each individual page.
+
+    Args:
+        css_code: CSS rules to apply globally. Example:
+            ":root { --ut-palette-primary: #00995D; }
+             .t-Button--hot { background: #00995D !important; }"
+
+    Returns:
+        JSON with status, page_0_created (bool), region_id.
+
+    Notes:
+        - Must be called during an active import session (after apex_create_app,
+          before or after adding other pages).
+        - Calling this multiple times adds multiple CSS regions on Page 0 —
+          concatenate your CSS into a single call for best results.
+        - The CSS renders inside a <style> tag at BODY position on every page.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+    if not session.import_begun:
+        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+
+    page0_created = False
+    try:
+        # Create Page 0 (Global Page) if not already registered
+        if 0 not in session.pages:
+            db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page(
+ p_id=>0
+,p_name=>'Global Page'
+,p_step_title=>'Global Page'
+,p_warn_on_unsaved_changes=>'N'
+,p_autocomplete_on_off=>'OFF'
+,p_page_template_options=>'#DEFAULT#'
+,p_protection_level=>'D'
+,p_deep_linking=>'N'
+);"""))
+            session.pages[0] = PageInfo(page_id=0, page_name="Global Page", page_type="global")
+            page0_created = True
+
+        # Add PL/SQL region to Page 0 that outputs <style> on every page
+        region_id = ids.next("global_css_region")
+        db.plsql(_blk(f"""
+wwv_flow_imp_page.create_page_plug(
+ p_id=>wwv_flow_imp.id({region_id})
+,p_plug_name=>'Global Theme CSS'
+,p_region_template_options=>'#DEFAULT#'
+,p_plug_template=>{REGION_TMPL_BLANK}
+,p_plug_display_sequence=>1
+,p_plug_display_point=>'BODY'
+,p_plug_source=>'begin sys.htp.p(''<style>{_esc(css_code)}</style>''); end;'
+,p_plug_source_type=>'NATIVE_PLSQL'
+,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
+);"""))
+
+        return json.dumps({
+            "status": "ok",
+            "page_0_created": page0_created,
+            "region_id": region_id,
+            "message": (
+                f"Global CSS injected via Page 0 ({len(css_code)} chars). "
+                "CSS will apply to every page automatically."
+            ),
         }, ensure_ascii=False, indent=2)
 
     except Exception as e:
