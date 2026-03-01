@@ -13,21 +13,12 @@ from ..templates import (
     PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA
+from ..utils import _esc, _blk, _sql_to_varchar2
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
-
 
 # Audit columns to skip when building form items
 _AUDIT_COLUMNS = {
@@ -381,19 +372,14 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_region_id=>wwv_flow_imp.id({ir_region_id})
-,p_max_row_count=>1000
 ,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows. Please apply a filter to reduce the number of records in your query.'
 ,p_no_data_found_message=>'No data found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
-,p_show_search_bar=>'{("Y" if include_search else "N")}'
-,p_show_actions_menu=>'Y'
 ,p_show_detail_link=>'C'
 ,p_detail_link=>'{_esc(edit_link)}'
 ,p_detail_link_text=>'<span aria-label="Edit"><span class="fa fa-edit" aria-hidden="true" title="Edit"></span></span>'
-,p_owner=>'APEX_MCP'
 ,p_internal_uid=>{ws_id}
 );"""))
         log.append("IR worksheet created")
@@ -887,17 +873,12 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_region_id=>wwv_flow_imp.id({ir_region_id})
-,p_max_row_count=>1000
 ,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows.'
 ,p_no_data_found_message=>'No data found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
-,p_show_search_bar=>'Y'
-,p_show_actions_menu=>'Y'
 ,p_show_detail_link=>'N'
-,p_owner=>'APEX_MCP'
 ,p_internal_uid=>{ws_id}
 );"""))
         log.append("IR worksheet created")

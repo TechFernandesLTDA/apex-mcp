@@ -12,16 +12,7 @@ import json
 from ..db import db
 from ..config import DB_USER
 from ..config import WORKSPACE_ID
-
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 # ---------------------------------------------------------------------------
@@ -1168,6 +1159,212 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
             "status": "error",
             "error": err_msg + hint
         }, ensure_ascii=False, indent=2)
+
+
+def apex_delete_item(app_id: int, page_id: int, item_name: str) -> str:
+    """Delete a specific item from a page.
+
+    Args:
+        app_id: Application ID.
+        page_id: Page ID.
+        item_name: Exact item name (e.g. "P10_STATUS"). Case-insensitive.
+
+    Returns:
+        JSON with status and deleted item name.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    try:
+        existing = db.execute("""
+            SELECT id, name
+              FROM wwv_flow_step_items
+             WHERE flow_id = :app_id
+               AND flow_step_id = :page_id
+               AND UPPER(name) = UPPER(:item_name)
+        """, {"app_id": app_id, "page_id": page_id, "item_name": item_name})
+
+        if not existing:
+            return json.dumps({
+                "status": "error",
+                "error": (
+                    f"Item '{item_name}' not found on page {page_id} of app {app_id}."
+                ),
+            })
+
+        internal_id = existing[0]["ID"]
+        found_name = existing[0]["NAME"]
+
+        db.plsql(_blk(f"""
+DELETE FROM wwv_flow_step_items
+ WHERE flow_id = {app_id}
+   AND flow_step_id = {page_id}
+   AND id = {internal_id};
+"""))
+        db.conn.commit()
+
+        return json.dumps({
+            "status": "ok",
+            "app_id": app_id,
+            "page_id": page_id,
+            "item_name": found_name,
+            "message": f"Item '{found_name}' deleted from page {page_id} of app {app_id}.",
+            "warning": "This deletion is permanent.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+def apex_delete_button(app_id: int, page_id: int, button_name: str) -> str:
+    """Delete a specific button from a page.
+
+    Args:
+        app_id: Application ID.
+        page_id: Page ID.
+        button_name: Exact button name (e.g. "CREATE"). Case-insensitive.
+
+    Returns:
+        JSON with status and deleted button name.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    try:
+        existing = db.execute("""
+            SELECT id, button_name AS name
+              FROM wwv_flow_step_buttons
+             WHERE flow_id = :app_id
+               AND flow_step_id = :page_id
+               AND UPPER(button_name) = UPPER(:button_name)
+        """, {"app_id": app_id, "page_id": page_id, "button_name": button_name})
+
+        if not existing:
+            return json.dumps({
+                "status": "error",
+                "error": (
+                    f"Button '{button_name}' not found on page {page_id} of app {app_id}."
+                ),
+            })
+
+        internal_id = existing[0]["ID"]
+        found_name = existing[0]["NAME"]
+
+        db.plsql(_blk(f"""
+DELETE FROM wwv_flow_step_buttons
+ WHERE flow_id = {app_id}
+   AND flow_step_id = {page_id}
+   AND id = {internal_id};
+"""))
+        db.conn.commit()
+
+        return json.dumps({
+            "status": "ok",
+            "app_id": app_id,
+            "page_id": page_id,
+            "button_name": found_name,
+            "message": f"Button '{found_name}' deleted from page {page_id} of app {app_id}.",
+            "warning": "This deletion is permanent.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+def apex_update_page(
+    app_id: int,
+    page_id: int,
+    new_name: str | None = None,
+    new_title: str | None = None,
+    new_auth_scheme: str | None = None,
+    new_page_mode: str | None = None,
+) -> str:
+    """Update page-level settings for an existing APEX page.
+
+    Args:
+        app_id: Application ID.
+        page_id: Page ID to update.
+        new_name: New page name (display name).
+        new_title: New browser/tab title.
+        new_auth_scheme: New authorization scheme name (empty string = remove auth).
+        new_page_mode: New page mode ("NORMAL", "MODAL_DIALOG", "NON_MODAL_DIALOG").
+
+    Returns:
+        JSON with status and updated fields.
+    """
+    if not db.is_connected():
+        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    if not any([new_name, new_title, new_auth_scheme is not None, new_page_mode]):
+        return json.dumps({
+            "status": "error",
+            "error": "Provide at least one field to update: new_name, new_title, new_auth_scheme, or new_page_mode.",
+        })
+
+    try:
+        # Verify page exists
+        existing = db.execute("""
+            SELECT id, name, step_title
+              FROM wwv_flow_steps
+             WHERE flow_id = :app_id
+               AND id = :page_id
+        """, {"app_id": app_id, "page_id": page_id})
+
+        if not existing:
+            return json.dumps({
+                "status": "error",
+                "error": f"Page {page_id} not found in application {app_id}.",
+            })
+
+        set_parts = []
+        updated_fields = {}
+
+        if new_name is not None:
+            set_parts.append(f"name = '{_esc(new_name)}'")
+            updated_fields["name"] = new_name
+
+        if new_title is not None:
+            set_parts.append(f"step_title = '{_esc(new_title)}'")
+            updated_fields["title"] = new_title
+
+        if new_auth_scheme is not None:
+            if new_auth_scheme:
+                set_parts.append(f"authorization_scheme = '{_esc(new_auth_scheme)}'")
+            else:
+                set_parts.append("authorization_scheme = NULL")
+            updated_fields["auth_scheme"] = new_auth_scheme or "(removed)"
+
+        if new_page_mode is not None:
+            valid_modes = {"NORMAL", "MODAL_DIALOG", "NON_MODAL_DIALOG"}
+            mode_upper = new_page_mode.upper()
+            if mode_upper not in valid_modes:
+                return json.dumps({
+                    "status": "error",
+                    "error": f"new_page_mode '{new_page_mode}' invalid. Valid: {sorted(valid_modes)}",
+                })
+            set_parts.append(f"page_mode = '{_esc(mode_upper)}'")
+            updated_fields["page_mode"] = mode_upper
+
+        set_clause = ",\n       ".join(set_parts)
+        db.plsql(_blk(f"""
+UPDATE wwv_flow_steps
+   SET {set_clause}
+ WHERE flow_id = {app_id}
+   AND id = {page_id};
+"""))
+        db.conn.commit()
+
+        return json.dumps({
+            "status": "ok",
+            "app_id": app_id,
+            "page_id": page_id,
+            "updated_fields": updated_fields,
+            "message": f"Page {page_id} updated in app {app_id}.",
+            "warning": "Verify changes in APEX App Builder.",
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
 
 
 def apex_copy_page(

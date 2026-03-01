@@ -4,14 +4,7 @@ import json
 from ..db import db
 from ..ids import ids
 from ..session import session
-
-
-def _esc(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 def apex_add_item_validation(

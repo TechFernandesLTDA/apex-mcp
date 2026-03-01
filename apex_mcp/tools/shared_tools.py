@@ -5,16 +5,7 @@ from ..db import db
 from ..ids import ids
 from ..session import session, LovInfo, AuthSchemeInfo
 from ..config import WORKSPACE_ID
-
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 def apex_add_lov(

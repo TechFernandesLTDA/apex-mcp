@@ -6,26 +6,10 @@ from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo, RegionInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK, REGION_TMPL_CARDS
-
-
-def _esc(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk, _sql_to_varchar2
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _sql_to_varchar2(sql: str) -> str:
-    """Split a SQL string into wwv_flow_string.join(wwv_flow_t_varchar2(...)) chunks."""
-    lines = sql.replace("'", "''").splitlines()
-    if not lines:
-        return "''"
-    quoted = [f"'{line}'" for line in lines]
-    return "wwv_flow_string.join(wwv_flow_t_varchar2(\n" + ",\n".join(quoted) + "))"
-
 
 def _js_to_varchar2(js: str) -> str:
     """Same as _sql_to_varchar2 but for JavaScript code."""
@@ -84,7 +68,8 @@ def apex_add_jet_chart(
             List of dicts: [{"sql": "...", "value_column": "VALUE",
                               "label_column": "LABEL", "series_name": "Series 2"}]
             Each extra series can have its own SQL query.
-        color_palette: Optional list of hex colors for chart series (e.g., ["#00995D", "#1e88e5"]). Overrides default JET colors.
+        color_palette: Optional list of hex colors for chart series (e.g., ["#00995D", "#1e88e5"]).
+            Note: color_palette is accepted for future compatibility but not applied in APEX 24.2.13.
 
     Returns:
         JSON with status, region_id, chart_id.
@@ -148,12 +133,6 @@ wwv_flow_imp_page.create_page_plug(
         if is_pie_type:
             pie_params = ",p_pie_other_threshold=>0\n,p_pie_selection_effect=>'highlightAndExplode'"
 
-        # Color palette override
-        palette_line = ""
-        if color_palette:
-            colors_js = "[" + ",".join(f'\\"{c}\\"' for c in color_palette) + "]"
-            palette_line = f",p_init_javascript_code=>'{{\"colors\":{colors_js}}}'"
-
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart(
  p_id=>wwv_flow_imp.id({chart_id})
@@ -193,7 +172,6 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_gauge_orientation=>'circular'
 ,p_gauge_plot_area=>'on'
 ,p_show_gauge_value=>true
-{palette_line}
 );"""))
 
         # ── 3. Create primary series ─────────────────────────────────────────
@@ -355,6 +333,7 @@ def apex_add_gauge(
         height: Gauge height in pixels (default 300).
         sequence: Region display order.
         color: Single color hex for the gauge needle/fill (optional).
+            Note: color is accepted for future compatibility but not applied in APEX 24.2.13.
 
     Returns:
         JSON with status, region_id, chart_id.
@@ -392,8 +371,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_num_rows=>15
 );"""))
 
-        color_line = f",p_init_javascript_code=>'{{\"color\":\"{color}\"}}'" if color else ""
-
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart(
  p_id=>wwv_flow_imp.id({chart_id})
@@ -407,7 +384,6 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_show_gauge_value=>true
 ,p_legend_rendered=>'off'
 ,p_overview_rendered=>'off'
-{color_line}
 );"""))
 
         db.plsql(_blk(f"""
@@ -499,6 +475,7 @@ def apex_add_funnel(
         height: Chart height in pixels (default 380).
         sequence: Region display order.
         color_palette: Optional hex color list per stage.
+            Note: color_palette is accepted for future compatibility but not applied in APEX 24.2.13.
 
     Returns:
         JSON with status, region_id, chart_id.
@@ -530,11 +507,6 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_num_rows=>15
 );"""))
 
-        palette_line = ""
-        if color_palette:
-            colors_js = "[" + ",".join(f'\\"{c}\\"' for c in color_palette) + "]"
-            palette_line = f",p_init_javascript_code=>'{{\"colors\":{colors_js}}}'"
-
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart(
  p_id=>wwv_flow_imp.id({chart_id})
@@ -551,7 +523,6 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
-{palette_line}
 );"""))
 
         db.plsql(_blk(f"""
@@ -1147,10 +1118,10 @@ def apex_add_calendar(
     sequence: int = 10,
     auth_scheme: str | None = None,
 ) -> str:
-    """Add a JET Calendar region to a page (APEX 24.2 native calendar).
+    """Add a CSS Calendar region to a page (APEX 24.2 native calendar).
 
-    Creates a NATIVE_JET_CHART region with chart_type='calendar'. The SQL query
-    must return at minimum a date column and a title column.
+    Creates a NATIVE_CSS_CALENDAR region. The SQL query must return at minimum
+    a date column and a title column.
 
     Args:
         page_id: Target page ID.
@@ -1167,7 +1138,7 @@ def apex_add_calendar(
         auth_scheme: Optional authorization scheme name.
 
     Returns:
-        JSON with status, page_id, region_name, region_id, chart_id.
+        JSON with status, page_id, region_name, region_id.
 
     Best practices:
         - Date columns should be DATE or TIMESTAMP type
@@ -1198,14 +1169,12 @@ def apex_add_calendar(
 
     try:
         region_id = ids.next(f"cal_region_{page_id}_{_esc(region_name)}")
-        chart_id  = ids.next(f"cal_chart_{page_id}_{_esc(region_name)}")
-        series_id = ids.next(f"cal_series_{page_id}_{_esc(region_name)}")
 
-        # ── 1. Create the region plug ─────────────────────────────────────────
         auth_line = (
             f",p_required_patch=>wwv_flow_imp.id_if_exists('{_esc(auth_scheme)}')"
             if auth_scheme else ""
         )
+        end_col = end_date_column.upper() if end_date_column else ""
 
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
@@ -1216,48 +1185,15 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_template=>{REGION_TMPL_STANDARD}
 ,p_plug_display_sequence=>{sequence}
 ,p_plug_display_point=>'BODY'
-,p_plug_source_type=>'NATIVE_JET_CHART'
-,p_plug_query_num_rows=>15
+,p_plug_source_type=>'NATIVE_CSS_CALENDAR'
+,p_plug_source=>{_sql_to_varchar2(sql_query)}
+,p_attribute_01=>'{_esc(date_column.upper())}'
+,p_attribute_02=>'{_esc(title_column.upper())}'
+,p_attribute_03=>'{view}'
+,p_attribute_04=>'{_esc(end_col)}'
 {auth_line}
 );"""))
 
-        # ── 2. Create the JET chart config (calendar type) ────────────────────
-        db.plsql(_blk(f"""
-wwv_flow_imp_page.create_jet_chart(
- p_id=>wwv_flow_imp.id({chart_id})
-,p_region_id=>wwv_flow_imp.id({region_id})
-,p_chart_type=>'calendar'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
-,p_orientation=>'vertical'
-,p_data_cursor=>'auto'
-,p_hide_and_show_behavior=>'withRescale'
-,p_initial_zooming=>'none'
-);"""))
-
-        # ── 3. Create the calendar series ─────────────────────────────────────
-        end_col_line = (
-            f"\n,p_items_end_date_column_name=>'{_esc(end_date_column.upper())}'"
-            if end_date_column else ""
-        )
-
-        db.plsql(_blk(f"""
-wwv_flow_imp_page.create_jet_chart_series(
- p_id=>wwv_flow_imp.id({series_id})
-,p_region_id=>wwv_flow_imp.id({region_id})
-,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_name=>'Events'
-,p_data_source_type=>'SQL'
-,p_location=>'LOCAL'
-,p_query_type=>'SQL'
-,p_series_query=>{_sql_to_varchar2(sql_query)}
-,p_items_value_column_name=>'{_esc(date_column.upper())}'
-,p_items_label_column_name=>'{_esc(title_column.upper())}'
-,p_series_type=>'auto'
-{end_col_line}
-);"""))
-
-        # Register in session
         session.regions[region_id] = RegionInfo(
             region_id=region_id,
             page_id=page_id,
@@ -1270,7 +1206,6 @@ wwv_flow_imp_page.create_jet_chart_series(
             "page_id": page_id,
             "region_name": region_name,
             "region_id": region_id,
-            "chart_id": chart_id,
             "display_as": view,
             "date_column": date_column.upper(),
             "title_column": title_column.upper(),

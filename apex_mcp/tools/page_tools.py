@@ -6,16 +6,7 @@ from ..ids import ids
 from ..session import session, PageInfo
 from ..templates import PAGE_TMPL_LOGIN
 from ..config import WORKSPACE_ID
-
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 def apex_add_page(
@@ -143,8 +134,11 @@ def apex_list_pages(app_id: int | None = None) -> str:
         app_id: Application ID. If omitted, uses current session app_id.
 
     Returns:
-        JSON array of pages with: PAGE_ID, PAGE_NAME, PAGE_MODE, AUTHORIZATION_SCHEME,
-        CREATED_ON, UPDATED_ON.
+        JSON object with keys:
+            - status: "ok" or "error"
+            - data: list of pages, each with PAGE_ID, PAGE_NAME, PAGE_MODE,
+                    AUTHORIZATION_SCHEME, CREATED_ON, UPDATED_ON
+            - count: total number of pages found
     """
     if not db.is_connected():
         return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
@@ -166,7 +160,7 @@ def apex_list_pages(app_id: int | None = None) -> str:
              ORDER BY page_id
         """, {"app_id": effective_app_id})
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return json.dumps({"status": "ok", "data": rows, "count": len(rows)}, default=str, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)

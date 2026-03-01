@@ -34,25 +34,7 @@ from ..templates import (
     PROC_DML,
     PROC_PLSQL,
 )
-
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
-
-
-def _sql_to_varchar2(sql: str) -> str:
-    """Convert multi-line SQL/PLSQL to wwv_flow_string.join(wwv_flow_t_varchar2(...))."""
-    lines = sql.replace("'", "''").splitlines()
-    if not lines:
-        return "''"
-    quoted = [f"'{line}'" for line in lines]
-    return "wwv_flow_string.join(wwv_flow_t_varchar2(\n" + ",\n".join(quoted) + "))"
+from ..utils import _esc, _blk, _sql_to_varchar2
 
 
 def _find_region_id(page_id: int, region_name: str) -> int | None:
@@ -553,7 +535,7 @@ def apex_add_process(
         # AJAX callbacks run at a specific process point
         exec_point = point
         if process_type_lower == "ajax":
-            exec_point = "AJAX_CALLBACK"
+            exec_point = "ON_DEMAND"
 
         process_id = ids.next(f"proc_{page_id}_{_esc(process_name)}")
 

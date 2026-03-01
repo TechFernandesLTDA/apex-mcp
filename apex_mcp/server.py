@@ -9,6 +9,9 @@ Usage:
 """
 from __future__ import annotations
 
+import logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+
 import fastmcp
 from fastmcp import FastMCP
 
@@ -63,6 +66,9 @@ from .tools.inspect_tools import (
     apex_update_item,
     apex_delete_page,
     apex_delete_region,
+    apex_delete_item,
+    apex_delete_button,
+    apex_update_page,
     apex_copy_page,
     apex_diff_app,
 )
@@ -367,6 +373,9 @@ mcp.tool()(apex_update_region)
 mcp.tool()(apex_update_item)
 mcp.tool()(apex_delete_page)
 mcp.tool()(apex_delete_region)
+mcp.tool()(apex_delete_item)
+mcp.tool()(apex_delete_button)
+mcp.tool()(apex_update_page)
 mcp.tool()(apex_copy_page)
 mcp.tool()(apex_diff_app)
 

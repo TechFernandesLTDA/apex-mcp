@@ -1,5 +1,6 @@
 """Configuration constants for Oracle APEX MCP Server."""
 import os
+import warnings
 
 # Oracle ADB connection defaults (all required — set via env vars or .mcp.json)
 DB_USER     = os.getenv("ORACLE_DB_USER", "")
@@ -27,3 +28,20 @@ APEX_COMPAT_MODE      = "24.2"
 DEFAULT_DATE_FORMAT      = "DD/MM/YYYY"
 DEFAULT_TIMESTAMP_FORMAT = "DD/MM/YYYY HH24:MI"
 DEFAULT_LANGUAGE         = "pt-br"
+
+_REQUIRED_VARS = {
+    "ORACLE_DB_USER": DB_USER,
+    "ORACLE_DB_PASS": DB_PASS,
+    "ORACLE_DSN": DB_DSN,
+    "ORACLE_WALLET_DIR": WALLET_DIR,
+    "APEX_WORKSPACE_ID": _ws_id_str,
+    "APEX_SCHEMA": APEX_SCHEMA,
+}
+_missing = [k for k, v in _REQUIRED_VARS.items() if not v or v == "0"]
+if _missing:
+    warnings.warn(
+        f"apex-mcp: missing required env vars: {', '.join(_missing)}. "
+        "Set them in .mcp.json or as environment variables.",
+        RuntimeWarning,
+        stacklevel=2,
+    )

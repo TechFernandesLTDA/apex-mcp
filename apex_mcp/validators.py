@@ -8,7 +8,7 @@ import re
 
 
 VALID_CHART_TYPES = {"bar", "line", "pie", "donut", "area", "scatter", "bubble",
-                     "funnel", "pyramid", "polar", "stock", "gantt", "calendar"}
+                     "funnel", "dial", "radar", "range", "combo"}
 VALID_ITEM_TYPES = {"TEXT_FIELD", "TEXTAREA", "NUMBER_FIELD", "DATE_PICKER",
                     "SELECT_LIST", "CHECKBOX", "RADIO_GROUP", "SWITCH", "HIDDEN",
                     "DISPLAY_ONLY", "FILE_BROWSE", "PASSWORD", "RICH_TEXT"}

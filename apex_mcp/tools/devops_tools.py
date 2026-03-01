@@ -8,20 +8,7 @@ from __future__ import annotations
 import json
 from ..db import db
 from ..session import session
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +94,25 @@ def apex_generate_rest_endpoints(
         pk_col = pk_column.upper()
         pk_col_lower = pk_col.lower()
 
+        # Get non-PK columns for PUT handler
+        col_rows = db.execute("""
+            SELECT column_name
+              FROM user_tab_columns
+             WHERE table_name = :tname
+               AND column_name != :pk
+             ORDER BY column_id
+        """, {"tname": table_upper, "pk": pk_col})
+
+        non_pk_cols = [r["COLUMN_NAME"] for r in col_rows]
+        if non_pk_cols:
+            set_clause = ", ".join(
+                f"{col} = :{col.lower()}" for col in non_pk_cols
+            )
+        else:
+            set_clause = pk_col + " = :" + pk_col_lower  # fallback
+
+        put_source = f"BEGIN UPDATE {table_upper} SET {set_clause} WHERE {pk_col} = :{pk_col_lower}; END;"
+
         # Resolve base path and module name
         effective_base = (base_path or table_name).lower().strip("/")
         module_name = effective_base
@@ -177,7 +183,7 @@ def apex_generate_rest_endpoints(
     p_source_type    => ORDS.source_type_plsql,
     p_mimes_allowed  => 'application/json',
     p_comments       => 'Update {_esc(table_upper)}',
-    p_source         => 'BEGIN UPDATE {_esc(table_upper)} SET ... WHERE {_esc(pk_col)} = :{pk_col_lower}; END;'
+    p_source         => '{_esc(put_source)}'
   );
   -- DELETE
   ORDS.DEFINE_HANDLER(

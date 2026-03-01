@@ -1,8 +1,11 @@
 """Import session state tracking."""
 from __future__ import annotations
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
+
+_log = logging.getLogger("apex_mcp.session")
 
 
 @dataclass
@@ -41,6 +44,38 @@ class AuthSchemeInfo:
 
 
 @dataclass
+class DynamicActionInfo:
+    da_id: int
+    page_id: int
+    da_name: str
+    event: str
+
+
+@dataclass
+class ChartInfo:
+    region_id: int
+    page_id: int
+    region_name: str
+    chart_type: str  # bar, line, pie, gauge, funnel, calendar, etc.
+
+
+@dataclass
+class ProcessInfo:
+    process_id: int
+    page_id: int
+    process_name: str
+    process_type: str
+    exec_point: str
+
+
+@dataclass
+class BranchInfo:
+    branch_id: int
+    page_id: int
+    branch_name: str
+
+
+@dataclass
 class ImportSession:
     """Tracks state of the current APEX app import session."""
 
@@ -59,6 +94,10 @@ class ImportSession:
     app_items: list[str] = field(default_factory=list)
     app_processes: list[str] = field(default_factory=list)
     buttons: dict[str, int] = field(default_factory=dict)  # key: "{page_id}:{button_name}"
+    dynamic_actions: dict[int, DynamicActionInfo] = field(default_factory=dict)  # key: da_id
+    charts: dict[int, ChartInfo] = field(default_factory=dict)                   # key: region_id
+    processes: dict[int, ProcessInfo] = field(default_factory=dict)              # key: process_id
+    branches: dict[int, BranchInfo] = field(default_factory=dict)               # key: branch_id
 
     _lock: threading.RLock = field(
         default_factory=threading.RLock, init=False, repr=False, compare=False
@@ -69,6 +108,7 @@ class ImportSession:
     def track_component(self, component_type: str, component_id: int) -> None:
         """Track a created component for potential rollback."""
         with self._lock:
+            _log.debug("Tracking component %s id=%s", component_type, component_id)
             self._created_components.append((component_type, component_id))
 
     def pop_rollback_log(self) -> list:
@@ -94,7 +134,12 @@ class ImportSession:
             self.app_items.clear()
             self.app_processes.clear()
             self.buttons.clear()
+            self.dynamic_actions.clear()
+            self.charts.clear()
+            self.processes.clear()
+            self.branches.clear()
             self._created_components.clear()
+            _log.info("Session reset (app_id=%s)", self.app_id)
 
     def summary(self) -> dict:
         return {
@@ -110,6 +155,10 @@ class ImportSession:
             "nav_items": len(self.nav_items),
             "app_items": len(self.app_items),
             "app_processes": len(self.app_processes),
+            "dynamic_actions": len(self.dynamic_actions),
+            "charts": len(self.charts),
+            "processes": len(self.processes),
+            "branches": len(self.branches),
             "tracked_components": len(self._created_components),
             "page_list": [
                 {"page_id": p.page_id, "name": p.page_name, "type": p.page_type}
@@ -120,3 +169,19 @@ class ImportSession:
 
 # Module-level singleton
 session = ImportSession()
+
+# Public exports — importable via:
+#   from apex_mcp.session import session, DynamicActionInfo, ChartInfo, ProcessInfo, BranchInfo
+__all__ = [
+    "session",
+    "ImportSession",
+    "PageInfo",
+    "RegionInfo",
+    "ItemInfo",
+    "LovInfo",
+    "AuthSchemeInfo",
+    "DynamicActionInfo",
+    "ChartInfo",
+    "ProcessInfo",
+    "BranchInfo",
+]

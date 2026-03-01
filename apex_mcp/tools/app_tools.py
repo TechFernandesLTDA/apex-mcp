@@ -10,18 +10,18 @@ from ..templates import (
     LIST_TMPL_SIDE_NAV, LIST_TMPL_NAVBAR,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA, APEX_VERSION_DATE, APEX_COMPAT_MODE
-
-
-def _blk(sql: str) -> str:
-    return f"begin\n{sql}\nend;"
+from ..utils import _blk
 
 
 def apex_list_apps() -> str:
     """List all APEX applications in the current workspace.
 
     Returns:
-        JSON array of apps with: APPLICATION_ID, APPLICATION_NAME, ALIAS, STATUS,
-        PAGES, LAST_UPDATED_ON, OWNER.
+        JSON object with keys:
+            - status: "ok" or "error"
+            - data: list of apps, each with APPLICATION_ID, APPLICATION_NAME, ALIAS,
+                    STATUS, PAGES, LAST_UPDATED_ON, OWNER
+            - count: total number of applications found
 
     Requires:
         - Active connection (call apex_connect first)
@@ -53,7 +53,7 @@ def apex_list_apps() -> str:
              ORDER BY application_id
         """)
 
-    return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+    return json.dumps({"status": "ok", "data": rows, "count": len(rows)}, default=str, ensure_ascii=False, indent=2)
 
 
 def apex_create_app(

@@ -12,19 +12,7 @@ from ..templates import (
     PROC_PLSQL,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA
-
-
-def _esc(v: str) -> str:
-    return v.replace("'", "''")
-
-def _blk(sql: str) -> str:
-    return f"begin\n{sql}\nend;"
-
-def _sql_to_varchar2(sql: str) -> str:
-    lines = sql.replace("'", "''").splitlines()
-    if not lines:
-        return "''"
-    return "wwv_flow_string.join(wwv_flow_t_varchar2(\n" + ",\n".join(f"'{l}'" for l in lines) + "))"
+from ..utils import _esc, _blk, _sql_to_varchar2
 
 
 # ---------------------------------------------------------------------------
@@ -184,18 +172,13 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_region_id=>wwv_flow_imp.id({ir_region_id})
-,p_max_row_count=>10000
 ,p_max_row_count_message=>'More than #MAX_ROW_COUNT# rows found — apply a filter.'
 ,p_no_data_found_message=>'No records found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
-,p_show_search_bar=>'Y'
-,p_show_actions_menu=>'Y'
 ,p_show_detail_link=>'N'
 ,p_download_formats=>'{"CSV:HTML:XLSX:PDF" if include_export else ""}'
-,p_owner=>'APEX_MCP'
 ,p_internal_uid=>{ws_id}
 );"""))
         log.append("IR region + worksheet created")
@@ -1725,23 +1708,15 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({master_ws_id})
-,p_region_id=>wwv_flow_imp.id({master_region_id})
-,p_max_row_count=>'1000000'
 ,p_no_data_found_message=>'No data found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
 ,p_lazy_loading=>false
 ,p_show_detail_link=>'N'
-,p_show_search_bar=>'Y'
-,p_show_actions_menu=>'Y'
-,p_show_select_columns=>'Y'
-,p_show_filter=>'Y'
-,p_show_sort=>'Y'
-,p_show_download=>'Y'
 ,p_download_formats=>'CSV:HTML:XLSX'
 ,p_enable_mail_download=>'Y'
-,p_version_scn=>1
+,p_internal_uid=>{master_ws_id}
 );"""))
 
         # ── Hidden item to store the selected master PK ───────────────────────
@@ -1788,23 +1763,15 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({detail_ws_id})
-,p_region_id=>wwv_flow_imp.id({detail_region_id})
-,p_max_row_count=>'1000000'
 ,p_no_data_found_message=>'Select a row above to see details.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
 ,p_lazy_loading=>false
 ,p_show_detail_link=>'N'
-,p_show_search_bar=>'Y'
-,p_show_actions_menu=>'Y'
-,p_show_select_columns=>'Y'
-,p_show_filter=>'Y'
-,p_show_sort=>'Y'
-,p_show_download=>'Y'
 ,p_download_formats=>'CSV:HTML:XLSX'
 ,p_enable_mail_download=>'Y'
-,p_version_scn=>1
+,p_internal_uid=>{detail_ws_id}
 );"""))
 
         # ── Dynamic Action: master IR row click -> set item + refresh detail ──
@@ -2238,23 +2205,15 @@ wwv_flow_imp_page.create_page_plug(
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_region_id=>wwv_flow_imp.id({ir_region_id})
-,p_max_row_count=>'1000000'
 ,p_no_data_found_message=>'No data found.'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
 ,p_lazy_loading=>false
 ,p_show_detail_link=>'N'
-,p_show_search_bar=>'Y'
-,p_show_actions_menu=>'Y'
-,p_show_select_columns=>'Y'
-,p_show_filter=>'Y'
-,p_show_sort=>'Y'
-,p_show_download=>'Y'
 ,p_download_formats=>'CSV:HTML:XLSX'
 ,p_enable_mail_download=>'Y'
-,p_version_scn=>1
+,p_internal_uid=>{ws_id}
 );"""))
 
         # ── Facet filter items + DAs ──────────────────────────────────────────

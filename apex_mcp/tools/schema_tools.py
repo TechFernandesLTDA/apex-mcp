@@ -1,7 +1,22 @@
 """Tools: apex_list_tables, apex_describe_table."""
 from __future__ import annotations
 import json
+import threading
+import time
 from ..db import db
+
+# ---------------------------------------------------------------------------
+# Module-level TTL cache for apex_describe_table
+# ---------------------------------------------------------------------------
+_describe_cache: dict[str, tuple[float, dict]] = {}  # key: table_name -> (timestamp, result)
+_describe_cache_lock = threading.Lock()
+_CACHE_TTL = 300  # 5 minutes
+
+
+def clear_schema_cache() -> None:
+    """Clear the describe_table metadata cache."""
+    with _describe_cache_lock:
+        _describe_cache.clear()
 
 
 def apex_list_tables(
@@ -23,9 +38,13 @@ def apex_list_tables(
                      Views will have num_rows = NULL.
 
     Returns:
-        JSON array. If include_columns=True, each entry has:
-        {object_name, object_type, num_rows, columns: [{column_name, data_type, nullable, data_length, data_precision}]}
-        If False: [{object_name, object_type, num_rows}]
+        JSON object with keys:
+            - status: "ok" or "error"
+            - data: list of objects. If include_columns=True, each entry has:
+                    {object_name, object_type, num_rows, columns: [{column_name, data_type,
+                    nullable, data_length, data_precision}]}. If False: [{object_name,
+                    object_type, num_rows}]
+            - count: total number of objects found
 
     Use this to discover available tables/views before using apex_generate_crud or apex_describe_table.
     """
@@ -86,7 +105,7 @@ def apex_list_tables(
                 }
                 for r in object_rows
             ]
-            return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+            return json.dumps({"status": "ok", "data": result, "count": len(result)}, default=str, ensure_ascii=False, indent=2)
 
         # Fetch all columns for matching objects in a single query.
         # USER_TAB_COLUMNS covers both tables and views.
@@ -130,7 +149,7 @@ def apex_list_tables(
                 "columns":     columns_by_object.get(oname, []),
             })
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return json.dumps({"status": "ok", "data": result, "count": len(result)}, default=str, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
@@ -309,14 +328,17 @@ def apex_detect_relationships(tables: list[str]) -> str:
         return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
 
 
-def apex_describe_table(table_name: str) -> str:
+def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
     """Get detailed metadata for a specific database table.
 
     Returns complete schema info including columns, primary keys, foreign keys,
     indexes, sequences, and triggers — everything needed to generate APEX forms and reports.
 
+    Results are cached for 5 minutes per table name to avoid redundant DB round-trips.
+
     Args:
         table_name: Table name (case-insensitive).
+        force_refresh: Bypass cache and fetch fresh from DB (default False).
 
     Returns:
         JSON with:
@@ -361,7 +383,17 @@ def apex_describe_table(table_name: str) -> str:
     if not db.is_connected():
         return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
-    upper_name = table_name.upper()
+    upper_name = table_name.upper().strip()
+    cache_key = upper_name
+
+    # Check cache first (unless force_refresh is requested)
+    if not force_refresh:
+        with _describe_cache_lock:
+            cached = _describe_cache.get(cache_key)
+            if cached:
+                ts, result = cached
+                if time.time() - ts < _CACHE_TTL:
+                    return json.dumps(result, default=str, ensure_ascii=False, indent=2)
 
     try:
         # 1. Columns
@@ -556,6 +588,10 @@ def apex_describe_table(table_name: str) -> str:
             "triggers":     triggers,
             "row_count":    row_count,
         }
+
+        # Store in cache before returning
+        with _describe_cache_lock:
+            _describe_cache[cache_key] = (time.time(), result)
 
         return json.dumps(result, default=str, ensure_ascii=False, indent=2)
 

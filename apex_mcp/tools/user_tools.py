@@ -3,16 +3,7 @@ from __future__ import annotations
 import json
 from ..db import db
 from ..config import WORKSPACE_ID
-
-
-def _esc(value: str) -> str:
-    """Escape single quotes for safe embedding in PL/SQL string literals."""
-    return value.replace("'", "''")
-
-
-def _blk(sql: str) -> str:
-    """Wrap SQL in an anonymous PL/SQL begin...end; block."""
-    return f"begin\n{sql}\nend;"
+from ..utils import _esc, _blk
 
 
 def apex_create_user(
