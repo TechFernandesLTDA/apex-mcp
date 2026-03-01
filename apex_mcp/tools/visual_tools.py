@@ -1231,8 +1231,8 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_animation_on_data_change=>'auto'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
-,p_hide_and_show_behavior=>'rescale'
-,p_initial_zooming=>'change'
+,p_hide_and_show_behavior=>'withRescale'
+,p_initial_zooming=>'none'
 );"""))
 
         # ── 3. Create the calendar series ─────────────────────────────────────

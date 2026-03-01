@@ -1,23 +1,27 @@
-"""Plataforma TEA — App 205 Completo.
+"""Plataforma TEA — App 205 — 30 Melhorias Visuais.
 
 Cria do zero um app APEX 24.2 completo para a Plataforma de Desfecho TEA
-com tema Unimed (#00995D), todas as telas e navegação estruturada.
+com tema Unimed (#00995D), todas as telas, 30 melhorias visuais e navegação
+estruturada com sub-itens.
 
-Páginas geradas:
+Páginas geradas (17):
   100 → Login (customizado)
-    1 → Dashboard (boas-vindas + métricas KPI + 2 gráficos JET)
-   10 → Beneficiários — lista (Interactive Report)
-   11 → Beneficiário — formulário (Create/Edit)
-   20 → Clínicas — lista (IR)
-   21 → Clínica — formulário
-   30 → Terapeutas — lista (IR)
-   31 → Terapeuta — formulário
-   50 → Nova Avaliação — Etapa 1 (dados gerais + domain badges)
-   51 → Nova Avaliação — Etapa 2 (Comunicação — 5 Likert)
-   52 → Nova Avaliação — Etapa 3 (Socialização — 5 Likert)
-   53 → Nova Avaliação — Etapa 4 (Habilidades — 5 Likert)
-   54 → Score Final (título contextual + círculo SVG + métricas + IR)
-   60 → Histórico de Avaliações (IR + filtros Status / Beneficiário)
+    1 → Dashboard (welcome + KPIs + sparklines + line + gauge + funnel + notif)
+   10 → Beneficiários — lista (IR + header contextual)
+   11 → Beneficiário — formulário (breadcrumb + banner + notif sucesso)
+   20 → Clínicas — lista (IR + header contextual)
+   21 → Clínica — formulário (breadcrumb + banner + notif sucesso)
+   30 → Terapeutas — lista (IR + header contextual)
+   31 → Terapeuta — formulário (breadcrumb + banner + notif sucesso)
+   50 → Nova Avaliação — Etapa 1 (dados gerais + domain badges + resumo paciente)
+   51 → Nova Avaliação — Etapa 2 (Comunicação — 5 Likert + progress bar + tooltips)
+   52 → Nova Avaliação — Etapa 3 (Socialização — 5 Likert + progress bar + tooltips)
+   53 → Nova Avaliação — Etapa 4 (Habilidades — 5 Likert + progress bar + tooltips)
+   54 → Score Final (SVG + domain cards + bar comparativo + counter JS + print)
+   60 → Histórico (IR + stats row + status pills + click-to-score)
+   61 → Analítico por Clínica (KPIs gradient + bar horizontal + donut)
+   70 → Auditoria (timeline TEA_LOG_AUDITORIA)
+   71 → Calendário (month view de avaliações)
 """
 import os, sys, json, time, textwrap
 
@@ -47,9 +51,12 @@ from apex_mcp.tools.shared_tools    import apex_add_app_item, apex_add_nav_item
 from apex_mcp.tools.generator_tools import apex_generate_login, apex_generate_crud
 from apex_mcp.tools.advanced_tools  import (
     apex_generate_wizard, apex_add_global_css, apex_generate_report_page,
+    apex_add_notification_region, apex_add_breadcrumb, apex_add_timeline,
 )
 from apex_mcp.tools.visual_tools    import (
     apex_add_metric_cards, apex_generate_analytics_page,
+    apex_add_jet_chart, apex_add_gauge, apex_add_funnel, apex_add_sparkline,
+    apex_add_calendar,
 )
 from apex_mcp.tools.js_tools        import apex_add_page_js
 from apex_mcp.themes                import UNIMED_THEME_CSS
@@ -180,6 +187,161 @@ APP_EXTRA_CSS = """
 /* ── Score action buttons ───────────────────────────────────────────────── */
 .tea-score-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
 .tea-score-actions .t-Button{text-decoration:none}
+
+/* ── Wizard step pulse animation ────────────────────────────────────────── */
+@keyframes tea-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(0,153,93,.5)}
+  50%{box-shadow:0 0 0 8px rgba(0,153,93,0)}
+}
+.t-WizardSteps-step.is-active .t-WizardSteps-marker{
+  animation:tea-pulse 1.8s infinite;
+}
+
+/* ── Wizard progress bar ────────────────────────────────────────────────── */
+.tea-progress-track{
+  height:6px;background:#e8ece9;border-radius:3px;
+  margin:8px 0 14px;overflow:hidden
+}
+.tea-progress-fill{
+  height:100%;background:#00995D;border-radius:3px;
+  transition:width .5s ease;width:0%
+}
+.tea-progress-label{
+  font-size:.78rem;color:#006B3F;font-weight:600;margin-bottom:4px
+}
+
+/* ── Patient summary (wizard etapa 1) ───────────────────────────────────── */
+.tea-patient-summary{
+  display:flex;gap:10px;flex-wrap:wrap;
+  padding:12px;background:#f8fffe;border-radius:8px;
+  border:1px solid rgba(0,153,93,.2);margin:8px 0
+}
+.tea-ps-card{
+  flex:1 1 120px;text-align:center;padding:8px 12px;
+  background:#fff;border-radius:6px;
+  box-shadow:0 1px 4px rgba(0,0,0,.08)
+}
+.tea-ps-card .tea-ps-num{
+  display:block;font-size:1.4rem;font-weight:800;color:#00995D
+}
+.tea-ps-card .tea-ps-lbl{
+  font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.4px
+}
+
+/* ── Likert button tooltip (CSS-only) ───────────────────────────────────── */
+.tea-likert-btn{position:relative}
+.tea-likert-btn::after{
+  content:attr(data-tooltip);
+  position:absolute;bottom:calc(100% + 6px);left:50%;
+  transform:translateX(-50%);
+  background:rgba(0,0,0,.75);color:#fff;
+  font-size:.7rem;white-space:nowrap;padding:3px 8px;
+  border-radius:4px;pointer-events:none;
+  opacity:0;transition:opacity .15s
+}
+.tea-likert-btn:hover::after{opacity:1}
+
+/* ── Form card styles ───────────────────────────────────────────────────── */
+.tea-form-card .t-Form-fieldContainer{
+  border-bottom:1px solid #f0f0f0;padding-bottom:10px;margin-bottom:6px
+}
+.tea-form-card .apex-item-text:focus,
+.tea-form-card .apex-item-select:focus{
+  border-color:#00995D!important;
+  box-shadow:0 0 0 2px rgba(0,153,93,.15)!important
+}
+
+/* ── Stats row (historico) ──────────────────────────────────────────────── */
+.tea-stats-row{
+  display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px
+}
+.tea-stat-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:8px 16px;border-radius:20px;
+  background:#fff;border:1px solid #e0e0e0;
+  box-shadow:0 1px 4px rgba(0,0,0,.07);
+  font-size:.85rem;font-weight:600;color:#333
+}
+.tea-stat-badge .fa{color:#00995D}
+.tea-stat-badge strong{color:#00995D;font-size:1.05rem}
+
+/* ── Status pills ───────────────────────────────────────────────────────── */
+.tea-status-pill{
+  display:inline-block;padding:3px 10px;border-radius:12px;
+  font-size:.78rem;font-weight:700;letter-spacing:.3px
+}
+.tea-status-concluida{background:#e8f5e9;color:#2e7d32}
+.tea-status-em_andamento{background:#fff3e0;color:#e65100}
+.tea-status-rascunho{background:#f3f3f3;color:#616161}
+.tea-status-cancelada{background:#ffebee;color:#c62828}
+
+/* ── Print media ────────────────────────────────────────────────────────── */
+@media print{
+  .t-Header,.t-NavigationBar,.t-Footer,
+  .t-BreadcrumbRegion,.tea-score-actions{display:none!important}
+  .tea-score-hero{box-shadow:none;border:1px solid #ccc}
+  body{background:#fff!important}
+}
+
+/* ── Nav active indicator animation ────────────────────────────────────── */
+@keyframes tea-nav-slide{
+  from{transform:scaleX(0)}
+  to{transform:scaleX(1)}
+}
+.t-NavigationBar-item.is-active a::after{
+  content:'';display:block;height:3px;background:#00995D;
+  border-radius:2px;animation:tea-nav-slide .25s ease
+}
+
+/* ── Metric card hover elevation ────────────────────────────────────────── */
+.apex-metric-card,.mcp-spark-card{
+  transition:transform .2s ease,box-shadow .2s ease
+}
+.apex-metric-card:hover,.mcp-spark-card:hover{
+  transform:translateY(-6px)!important;
+  box-shadow:0 10px 28px rgba(0,0,0,.14)!important
+}
+
+/* ── Page fade-in ───────────────────────────────────────────────────────── */
+@keyframes tea-fade-in{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.t-Body-contentInner{
+  animation:tea-fade-in .4s ease both
+}
+
+/* ── Empty state IR ─────────────────────────────────────────────────────── */
+.a-IRR-noDataMsg{
+  padding:48px 32px;text-align:center;
+  color:#aaa;font-size:1rem
+}
+.a-IRR-noDataMsg::before{
+  content:'\\f07c';font-family:'Font APEX';
+  display:block;font-size:3rem;margin-bottom:12px;
+  color:#ddd
+}
+
+/* ── Responsive: Likert mobile ──────────────────────────────────────────── */
+@media(max-width:640px){
+  .tea-likert-group{flex-direction:column!important}
+  .tea-likert-btn{
+    width:100%;flex-direction:row;justify-content:flex-start;
+    gap:12px;min-height:48px;padding:10px 16px
+  }
+  .tea-likert-score{font-size:18px;margin-bottom:0}
+}
+
+/* ── Responsive: Dashboard mobile ──────────────────────────────────────── */
+@media(max-width:768px){
+  .tea-welcome{flex-direction:column;text-align:center}
+  .tea-welcome .t-Button--hot{align-self:center}
+  .mcp-spark-grid{gap:10px}
+  .mcp-spark-card{min-width:calc(50% - 10px)!important;flex:1 1 calc(50% - 10px)!important}
+  .tea-score-hero{flex-direction:column;text-align:center;gap:20px;padding:20px}
+  .tea-stats-row{gap:8px}
+  .tea-stat-badge{font-size:.78rem;padding:6px 12px}
+}
 """.strip()
 
 
@@ -208,9 +370,88 @@ JS_P54 = r"""
     setTimeout(function() {
       $arc.css('stroke-dasharray', target + ' 314');
     }, 400);
+    // Counter animation for score number
+    var $num = $('.tea-score-number');
+    if ($num.length) {
+      var finalVal = parseInt($num.text(), 10) || 0;
+      $({counter: 0}).animate({counter: finalVal}, {
+        duration: 900, easing: 'swing',
+        step: function() { $num.text(Math.ceil(this.counter)); },
+        complete: function() { $num.text(finalVal); }
+      });
+    }
+    // Counter animation for percentage
+    var $pct = $('.tea-score-pct');
+    if ($pct.length) {
+      var finalPct = parseInt($pct.text(), 10) || 0;
+      $({v: 0}).animate({v: finalPct}, {
+        duration: 1000, easing: 'swing',
+        step: function() { $pct.text(Math.ceil(this.v) + '%'); },
+        complete: function() { $pct.text(finalPct + '%'); }
+      });
+    }
   });
 })(apex.jQuery);
 """.strip()
+
+# ── Histórico — status pills + click-to-score (pág. 60) ─────────────────────
+JS_P60 = r"""
+(function($) {
+  var STATUS_COLORS = {
+    'CONCLUIDA':    {bg:'#e8f5e9', color:'#2e7d32', label:'Concluida'},
+    'EM_ANDAMENTO': {bg:'#fff3e0', color:'#e65100', label:'Em Andamento'},
+    'RASCUNHO':     {bg:'#f3f3f3', color:'#616161', label:'Rascunho'},
+    'CANCELADA':    {bg:'#ffebee', color:'#c62828', label:'Cancelada'}
+  };
+  var APP_ID = $v('APP_ID') || apex.env.APP_ID;
+  var SESSION = $v('APP_SESSION') || apex.env.APP_SESSION;
+
+  function styleTable() {
+    // Status pills
+    $('td[headers]').each(function() {
+      var $td = $(this);
+      var txt = $.trim($td.text()).toUpperCase();
+      if (STATUS_COLORS[txt]) {
+        var c = STATUS_COLORS[txt];
+        $td.html('<span class="tea-status-pill" style="background:'+c.bg+';color:'+c.color+'">'+c.label+'</span>');
+      }
+    });
+    // First column (ID) click -> score page
+    $('td:first-child a, .a-IRR-table tr td:first-child').css({color:'#00995D', cursor:'pointer'});
+    $('.a-IRR-table tr').off('click.tea').on('click.tea', 'td:first-child', function() {
+      var idVal = $.trim($(this).text());
+      if (!isNaN(parseInt(idVal))) {
+        apex.navigation.redirect('f?p='+APP_ID+':54:'+SESSION+'::NO:54:P54_ID_AVALIACAO:'+idVal);
+      }
+    });
+  }
+
+  apex.jQuery(document).on('apexreadyend apexafterrefresh', styleTable);
+})(apex.jQuery);
+""".strip()
+
+# ── Wizard — progress bar JS (injetado em p51, p52, p53) ────────────────────
+def make_progress_js(items: list[str], step_num: int, total_steps: int = 3) -> str:
+    items_json = json.dumps(items)
+    pct = round(step_num / total_steps * 100)
+    return f"""(function($) {{
+  apex.jQuery(document).on('apexreadyend', function() {{
+    var items = {items_json};
+    var $fill = $('.tea-progress-fill');
+    function updateProgress() {{
+      var filled = items.filter(function(id) {{
+        return apex.item(id).getValue() !== '';
+      }}).length;
+      var pct = Math.round(filled / items.length * 100);
+      $fill.css('width', pct + '%');
+    }}
+    // Base progress from current step
+    $fill.css('width', '{pct}%');
+    items.forEach(function(id) {{
+      apex.item(id).addChangeCallback(updateProgress);
+    }});
+  }});
+}})(apex.jQuery);""".strip()
 
 
 def make_likert_js(question_ids: list[str]) -> str:
@@ -245,7 +486,8 @@ def make_likert_js(question_ids: list[str]) -> str:
           cfg.forEach(function(c) {{
             html +=
               '<button type="button" class="tea-likert-btn" ' +
-              'data-item="'+id+'" data-value="'+c.val+'">' +
+              'data-item="'+id+'" data-value="'+c.val+'" ' +
+              'data-tooltip="'+c.label+' ('+c.val+')">' +
               '<span class="tea-likert-score" style="color:'+c.color+'">'+c.val+'</span>' +
               '<span class="tea-likert-label">'+c.label+'</span>' +
               '</button>';
@@ -338,6 +580,108 @@ BEGIN
   sys.htp.p('<i class="fa fa-list" aria-hidden="true"></i>');
   sys.htp.p('<div><strong>Hist&oacute;rico de Avalia&ccedil;&otilde;es</strong> &mdash; use os filtros para refinar por status ou benefici&aacute;rio</div>');
   sys.htp.p('</div>');
+END;
+""".strip()
+
+# ── Beneficiário — form banner (pág. 11) ────────────────────────────────────
+BANNER_P11 = """
+DECLARE v_label VARCHAR2(200) := 'Novo Beneficiario';
+BEGIN
+  IF :P11_ID_BENEFICIARIO IS NOT NULL THEN
+    BEGIN
+      SELECT 'Editando: ' || DS_NOME INTO v_label
+        FROM TEA_BENEFICIARIOS WHERE ID_BENEFICIARIO = TO_NUMBER(:P11_ID_BENEFICIARIO);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+  sys.htp.p('<div class="tea-page-header">');
+  sys.htp.p('<i class="fa fa-user" aria-hidden="true"></i>');
+  sys.htp.p('<div><strong>' || APEX_ESCAPE.HTML(v_label) || '</strong></div>');
+  sys.htp.p('</div>');
+END;
+""".strip()
+
+# ── Clínica — form banner (pág. 21) ─────────────────────────────────────────
+BANNER_P21 = """
+DECLARE v_label VARCHAR2(200) := 'Nova Clinica';
+BEGIN
+  IF :P21_ID_CLINICA IS NOT NULL THEN
+    BEGIN
+      SELECT 'Editando: ' || DS_NOME INTO v_label
+        FROM TEA_CLINICAS WHERE ID_CLINICA = TO_NUMBER(:P21_ID_CLINICA);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+  sys.htp.p('<div class="tea-page-header">');
+  sys.htp.p('<i class="fa fa-hospital" aria-hidden="true"></i>');
+  sys.htp.p('<div><strong>' || APEX_ESCAPE.HTML(v_label) || '</strong></div>');
+  sys.htp.p('</div>');
+END;
+""".strip()
+
+# ── Terapeuta — form banner (pág. 31) ───────────────────────────────────────
+BANNER_P31 = """
+DECLARE v_label VARCHAR2(200) := 'Novo Terapeuta';
+BEGIN
+  IF :P31_ID_TERAPEUTA IS NOT NULL THEN
+    BEGIN
+      SELECT 'Editando: ' || DS_NOME INTO v_label
+        FROM TEA_TERAPEUTAS WHERE ID_TERAPEUTA = TO_NUMBER(:P31_ID_TERAPEUTA);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+  sys.htp.p('<div class="tea-page-header">');
+  sys.htp.p('<i class="fa fa-user-md" aria-hidden="true"></i>');
+  sys.htp.p('<div><strong>' || APEX_ESCAPE.HTML(v_label) || '</strong></div>');
+  sys.htp.p('</div>');
+END;
+""".strip()
+
+# ── Histórico — stats resumo (pág. 60) ──────────────────────────────────────
+STATS_P60 = """
+DECLARE
+  v_total   NUMBER;
+  v_conc    NUMBER;
+  v_pct_ok  NUMBER;
+  v_avg_sc  NUMBER;
+BEGIN
+  SELECT COUNT(*), COUNT(CASE WHEN DS_STATUS='CONCLUIDA' THEN 1 END),
+         NVL(ROUND(AVG(CASE WHEN DS_STATUS='CONCLUIDA' THEN NR_PCT_TOTAL END),0),0)
+    INTO v_total, v_conc, v_avg_sc
+    FROM TEA_AVALIACOES;
+  v_pct_ok := CASE WHEN v_total > 0 THEN ROUND(v_conc / v_total * 100, 0) ELSE 0 END;
+  sys.htp.p('<div class="tea-stats-row">');
+  sys.htp.p('<div class="tea-stat-badge"><i class="fa fa-list"></i>Total: <strong>'||v_total||'</strong></div>');
+  sys.htp.p('<div class="tea-stat-badge"><i class="fa fa-check-circle"></i>Concluidas: <strong>'||v_conc||'</strong></div>');
+  sys.htp.p('<div class="tea-stat-badge"><i class="fa fa-percent"></i>Taxa: <strong>'||v_pct_ok||'%</strong></div>');
+  sys.htp.p('<div class="tea-stat-badge"><i class="fa fa-chart-bar"></i>Score medio: <strong>'||v_avg_sc||'%</strong></div>');
+  sys.htp.p('</div>');
+END;
+""".strip()
+
+# ── Wizard — resumo do paciente (pág. 50) ────────────────────────────────────
+PATIENT_SUMMARY_P50 = """
+DECLARE
+  v_n    NUMBER;
+  v_avg  NUMBER;
+  v_ult  VARCHAR2(20);
+BEGIN
+  IF :P50_ID_BENEFICIARIO IS NOT NULL THEN
+    SELECT COUNT(*),
+           NVL(ROUND(AVG(NR_PCT_TOTAL),0),0),
+           NVL(TO_CHAR(MAX(DT_AVALIACAO),'DD/MM/YYYY'),'—')
+      INTO v_n, v_avg, v_ult
+      FROM TEA_AVALIACOES
+     WHERE ID_BENEFICIARIO = TO_NUMBER(:P50_ID_BENEFICIARIO)
+       AND DS_STATUS = 'CONCLUIDA';
+    IF v_n > 0 THEN
+      sys.htp.p('<div class="tea-patient-summary">');
+      sys.htp.p('<div class="tea-ps-card"><span class="tea-ps-num">'||v_n||'</span><span class="tea-ps-lbl">Aval. anteriores</span></div>');
+      sys.htp.p('<div class="tea-ps-card"><span class="tea-ps-num">'||v_avg||'%</span><span class="tea-ps-lbl">Score medio</span></div>');
+      sys.htp.p('<div class="tea-ps-card"><span class="tea-ps-num">'||v_ult||'</span><span class="tea-ps-lbl">Ultima aval.</span></div>');
+      sys.htp.p('</div>');
+    END IF;
+  END IF;
 END;
 """.strip()
 
@@ -656,7 +1000,7 @@ def run():
     t0 = time.perf_counter()
     print("\n" + "=" * 62)
     print(f"  {APP_NAME}")
-    print(f"  App ID: {APP_ID}  |  14 páginas  |  Tema Unimed #00995D")
+    print(f"  App ID: {APP_ID}  |  17 páginas  |  30 melhorias visuais  |  Tema Unimed #00995D")
     print("=" * 62)
 
     # ── [1] Conectar ──────────────────────────────────────────────────────────
@@ -752,20 +1096,223 @@ def run():
     # Banner de boas-vindas aparece ANTES dos KPIs (seq=1 < seq=10)
     add_plsql_region(1, "Bem-vindo", WELCOME_P1, seq=1)
 
+    # [#5] Notificação welcome para novos usuários (seq=0 — antes de tudo)
+    ok(
+        "apex_add_notification_region(1, Guia Rapido)",
+        apex_add_notification_region(
+            page_id=1,
+            region_name="Guia Rapido",
+            message_sql=(
+                "SELECT 'Bem-vindo! Comece criando uma avaliacao: acesse Nova Avaliacao no menu,"
+                " selecione o beneficiario e preencha as 4 etapas do protocolo ICHOM.'"
+                " FROM DUAL WHERE (SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA') = 0"
+            ),
+            notification_type="info",
+            dismissible=True,
+            sequence=0,
+        ),
+    )
+
+    # [#1] Sparkline trend cards (seq=15 — entre KPIs e gráficos)
+    ok(
+        "apex_add_sparkline(1, Tendencias)",
+        apex_add_sparkline(
+            page_id=1,
+            region_name="Tendencias Mensais",
+            metrics=[
+                {
+                    "label": "Avaliacoes / Mes",
+                    "sql": (
+                        "SELECT COUNT(*) FROM TEA_AVALIACOES "
+                        "WHERE TRUNC(DT_AVALIACAO,'MM') = TRUNC(SYSDATE,'MM')"
+                    ),
+                    "trend_sql": (
+                        "SELECT COUNT(*) AS VALUE FROM TEA_AVALIACOES "
+                        "WHERE TRUNC(DT_AVALIACAO,'MM') = ADD_MONTHS(TRUNC(SYSDATE,'MM'), -ROWNUM+1) - INTERVAL '1' MONTH "
+                        "GROUP BY TRUNC(DT_AVALIACAO,'MM') ORDER BY 1"
+                    ),
+                    "icon": "fa-clipboard-check",
+                    "color": "#00995D",
+                    "suffix": " aval",
+                },
+                {
+                    "label": "Score Medio",
+                    "sql": (
+                        "SELECT NVL(ROUND(AVG(NR_PCT_TOTAL),0),0) "
+                        "FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'"
+                    ),
+                    "trend_sql": (
+                        "SELECT ROUND(AVG(NR_PCT_TOTAL),0) AS VALUE "
+                        "FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' "
+                        "AND DT_AVALIACAO >= ADD_MONTHS(SYSDATE,-7) "
+                        "GROUP BY TRUNC(DT_AVALIACAO,'MM') ORDER BY 1"
+                    ),
+                    "icon": "fa-chart-bar",
+                    "color": "#1E88E5",
+                    "suffix": "%",
+                },
+                {
+                    "label": "Terapeutas Ativos",
+                    "sql": "SELECT COUNT(DISTINCT ID_TERAPEUTA) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'",
+                    "trend_sql": (
+                        "SELECT COUNT(DISTINCT ID_TERAPEUTA) AS VALUE "
+                        "FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' "
+                        "GROUP BY TRUNC(DT_AVALIACAO,'MM') ORDER BY 1 FETCH FIRST 7 ROWS ONLY"
+                    ),
+                    "icon": "fa-user-md",
+                    "color": "#7B1FA2",
+                },
+                {
+                    "label": "% Alto Desenvolvimento",
+                    "sql": (
+                        "SELECT NVL(ROUND(COUNT(CASE WHEN NR_PCT_TOTAL>=75 THEN 1 END)"
+                        " * 100.0 / NULLIF(COUNT(*),0),0),0) "
+                        "FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'"
+                    ),
+                    "trend_sql": (
+                        "SELECT ROUND(COUNT(CASE WHEN NR_PCT_TOTAL>=75 THEN 1 END)"
+                        " * 100.0 / NULLIF(COUNT(*),0),0) AS VALUE "
+                        "FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' "
+                        "GROUP BY TRUNC(DT_AVALIACAO,'MM') ORDER BY 1 FETCH FIRST 7 ROWS ONLY"
+                    ),
+                    "icon": "fa-star",
+                    "color": "#FF9800",
+                    "suffix": "%",
+                },
+            ],
+            sequence=15,
+        ),
+    )
+
+    # [#2] Line chart — Evolução Score 12 meses (seq=30)
+    ok(
+        "apex_add_jet_chart(1, line, Evolucao Score)",
+        apex_add_jet_chart(
+            page_id=1,
+            region_name="Evolucao do Score (12 meses)",
+            chart_type="line",
+            sql_query=(
+                "SELECT TO_CHAR(TRUNC(DT_AVALIACAO,'MM'),'MM/YYYY') AS LABEL,"
+                "       ROUND(AVG(NR_PCT_TOTAL),1) AS VALUE"
+                " FROM TEA_AVALIACOES"
+                " WHERE DS_STATUS = 'CONCLUIDA'"
+                "   AND DT_AVALIACAO >= ADD_MONTHS(SYSDATE,-12)"
+                " GROUP BY TRUNC(DT_AVALIACAO,'MM')"
+                " ORDER BY TRUNC(DT_AVALIACAO,'MM')"
+            ),
+            series_name="Score Medio (%)",
+            y_axis_title="Score (%)",
+            x_axis_title="Mes",
+            height=320,
+            sequence=30,
+        ),
+    )
+
+    # [#3] Gauge — Taxa Alto Desenvolvimento (seq=25)
+    ok(
+        "apex_add_gauge(1, Taxa Alto Desenvolvimento)",
+        apex_add_gauge(
+            page_id=1,
+            region_name="Taxa de Alto Desenvolvimento",
+            sql_query=(
+                "SELECT NVL(ROUND(COUNT(CASE WHEN NR_PCT_TOTAL>=75 THEN 1 END)"
+                " * 100.0 / NULLIF(COUNT(*),0),0),0) AS VALUE"
+                " FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'"
+            ),
+            min_value=0,
+            max_value=100,
+            thresholds=[
+                {"max": 33,  "color": "#E53935"},
+                {"max": 66,  "color": "#FF9800"},
+                {"max": 100, "color": "#43A047"},
+            ],
+            height=280,
+            sequence=25,
+        ),
+    )
+
+    # [#4] Funnel — Pipeline de Status (seq=35)
+    ok(
+        "apex_add_funnel(1, Pipeline de Status)",
+        apex_add_funnel(
+            page_id=1,
+            region_name="Pipeline de Avaliacoes por Status",
+            sql_query=(
+                "SELECT DECODE(DS_STATUS,'CONCLUIDA','Concluida',"
+                "'EM_ANDAMENTO','Em Andamento','RASCUNHO','Rascunho','Cancelada') AS LABEL,"
+                " COUNT(*) AS VALUE"
+                " FROM TEA_AVALIACOES"
+                " GROUP BY DS_STATUS"
+                " ORDER BY DECODE(DS_STATUS,'CONCLUIDA',1,'EM_ANDAMENTO',2,'RASCUNHO',3,4)"
+            ),
+            series_name="Avaliacoes",
+            height=320,
+            sequence=35,
+        ),
+    )
+
     # ── [6] CRUD Beneficiários (págs. 10 / 11) ───────────────────────────────
     section("[6] CRUD Beneficiários — páginas 10 / 11")
     ok("apex_generate_crud(TEA_BENEFICIARIOS)", apex_generate_crud("TEA_BENEFICIARIOS", 10, 11))
     add_plsql_region(10, "Cabecalho", BANNER_P10, seq=1)
+    # [#6] Breadcrumb no form
+    ok("apex_add_breadcrumb(11)", apex_add_breadcrumb(
+        page_id=11, region_name="Navegacao",
+        entries=[{"label": "Dashboard", "page_id": 1},
+                 {"label": "Beneficiarios", "page_id": 10},
+                 {"label": "Formulario", "page_id": None}],
+        sequence=0,
+    ))
+    # [#7] Banner contextual no form
+    add_plsql_region(11, "Contexto", BANNER_P11, seq=1)
+    # [#9] Notificacao de sucesso
+    ok("apex_add_notification_region(11, Sucesso)", apex_add_notification_region(
+        page_id=11, region_name="Sucesso",
+        message="Registro salvo com sucesso!",
+        notification_type="success", dismissible=True, sequence=2,
+    ))
 
     # ── [7] CRUD Clínicas (págs. 20 / 21) ────────────────────────────────────
     section("[7] CRUD Clínicas — páginas 20 / 21")
     ok("apex_generate_crud(TEA_CLINICAS)", apex_generate_crud("TEA_CLINICAS", 20, 21))
     add_plsql_region(20, "Cabecalho", BANNER_P20, seq=1)
+    # [#6] Breadcrumb no form
+    ok("apex_add_breadcrumb(21)", apex_add_breadcrumb(
+        page_id=21, region_name="Navegacao",
+        entries=[{"label": "Dashboard", "page_id": 1},
+                 {"label": "Clinicas", "page_id": 20},
+                 {"label": "Formulario", "page_id": None}],
+        sequence=0,
+    ))
+    # [#7] Banner contextual no form
+    add_plsql_region(21, "Contexto", BANNER_P21, seq=1)
+    # [#9] Notificacao de sucesso
+    ok("apex_add_notification_region(21, Sucesso)", apex_add_notification_region(
+        page_id=21, region_name="Sucesso",
+        message="Registro salvo com sucesso!",
+        notification_type="success", dismissible=True, sequence=2,
+    ))
 
     # ── [8] CRUD Terapeutas (págs. 30 / 31) ──────────────────────────────────
     section("[8] CRUD Terapeutas — páginas 30 / 31")
     ok("apex_generate_crud(TEA_TERAPEUTAS)", apex_generate_crud("TEA_TERAPEUTAS", 30, 31))
     add_plsql_region(30, "Cabecalho", BANNER_P30, seq=1)
+    # [#6] Breadcrumb no form
+    ok("apex_add_breadcrumb(31)", apex_add_breadcrumb(
+        page_id=31, region_name="Navegacao",
+        entries=[{"label": "Dashboard", "page_id": 1},
+                 {"label": "Terapeutas", "page_id": 30},
+                 {"label": "Formulario", "page_id": None}],
+        sequence=0,
+    ))
+    # [#7] Banner contextual no form
+    add_plsql_region(31, "Contexto", BANNER_P31, seq=1)
+    # [#9] Notificacao de sucesso
+    ok("apex_add_notification_region(31, Sucesso)", apex_add_notification_region(
+        page_id=31, region_name="Sucesso",
+        message="Registro salvo com sucesso!",
+        notification_type="success", dismissible=True, sequence=2,
+    ))
 
     # ── [9] Histórico de Avaliações (pág. 60) ────────────────────────────────
     section("[9] Histórico de Avaliações — página 60 (com filtros)")
@@ -797,6 +1344,10 @@ def run():
         ),
     )
     add_plsql_region(60, "Cabecalho", BANNER_P60, seq=1)
+    # [#17] Stats resumo
+    add_plsql_region(60, "Stats Resumo", STATS_P60, seq=3)
+    # [#18, #19] Status pills + click-to-score JS
+    ok("apex_add_page_js(60)", apex_add_page_js(60, JS_P60))
 
     # ── [10] Wizard TEA 4 etapas (págs. 50–53) ───────────────────────────────
     section("[10] Wizard TEA — páginas 50–53")
@@ -911,17 +1462,33 @@ def run():
     add_plsql_region(52, "Intro Etapa 3", INTRO_P52, seq=1)
     add_plsql_region(53, "Intro Etapa 4", INTRO_P53, seq=1)
 
-    # JavaScript: data padrão (pág. 50) + Likert visual (págs. 51–53)
+    # [#12] Resumo do paciente na Etapa 1 (seq=3, após intro)
+    add_plsql_region(50, "Resumo Paciente", PATIENT_SUMMARY_P50, seq=3)
+
+    # [#11] Barra de progresso nas etapas Likert (seq=2, após intro)
+    _progress_html = (
+        "BEGIN\n"
+        "  sys.htp.p('<div class=\"tea-progress-label\">Progresso nesta etapa</div>');\n"
+        "  sys.htp.p('<div class=\"tea-progress-track\"><div class=\"tea-progress-fill\"></div></div>');\n"
+        "END;"
+    )
+    add_plsql_region(51, "Progresso", _progress_html, seq=2)
+    add_plsql_region(52, "Progresso", _progress_html, seq=2)
+    add_plsql_region(53, "Progresso", _progress_html, seq=2)
+
+    # JavaScript: data padrão (pág. 50) + Likert visual + progress + tooltips (págs. 51–53)
     ok("apex_add_page_js(50)", apex_add_page_js(50, JS_P50))
+
+    _com_items = ["P51_COM_Q1","P51_COM_Q2","P51_COM_Q3","P51_COM_Q4","P51_COM_Q5"]
+    _soc_items = ["P52_SOC_Q1","P52_SOC_Q2","P52_SOC_Q3","P52_SOC_Q4","P52_SOC_Q5"]
+    _hab_items = ["P53_HAB_Q1","P53_HAB_Q2","P53_HAB_Q3","P53_HAB_Q4","P53_HAB_Q5"]
+
     ok("apex_add_page_js(51)",
-       apex_add_page_js(51, make_likert_js(
-           ["P51_COM_Q1","P51_COM_Q2","P51_COM_Q3","P51_COM_Q4","P51_COM_Q5"])))
+       apex_add_page_js(51, make_likert_js(_com_items) + "\n\n" + make_progress_js(_com_items, 1)))
     ok("apex_add_page_js(52)",
-       apex_add_page_js(52, make_likert_js(
-           ["P52_SOC_Q1","P52_SOC_Q2","P52_SOC_Q3","P52_SOC_Q4","P52_SOC_Q5"])))
+       apex_add_page_js(52, make_likert_js(_soc_items) + "\n\n" + make_progress_js(_soc_items, 2)))
     ok("apex_add_page_js(53)",
-       apex_add_page_js(53, make_likert_js(
-           ["P53_HAB_Q1","P53_HAB_Q2","P53_HAB_Q3","P53_HAB_Q4","P53_HAB_Q5"])))
+       apex_add_page_js(53, make_likert_js(_hab_items) + "\n\n" + make_progress_js(_hab_items, 3)))
 
     # Processo de salvamento (pág. 53 — botão FINALIZAR)
     ok(
@@ -995,6 +1562,116 @@ def run():
         ),
     )
 
+    # [#14] Metric cards por domínio (seq=12)
+    ok(
+        "apex_add_metric_cards(54, Dominios)",
+        apex_add_metric_cards(
+            page_id=54,
+            region_name="Scores por Dominio",
+            style="white",
+            metrics=[
+                {
+                    "label": "Comunicacao",
+                    "sql": (
+                        "SELECT NVL(d.NR_SCORE,0)"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                        " AND UPPER(dim.DS_NOME) LIKE '%COMUNI%' AND ROWNUM=1"
+                    ),
+                    "unit": "/ 15",
+                    "icon": "fa-comments",
+                    "color": "#1E88E5",
+                },
+                {
+                    "label": "Socializacao",
+                    "sql": (
+                        "SELECT NVL(d.NR_SCORE,0)"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                        " AND UPPER(dim.DS_NOME) LIKE '%SOCIAL%' AND ROWNUM=1"
+                    ),
+                    "unit": "/ 15",
+                    "icon": "fa-users",
+                    "color": "#7B1FA2",
+                },
+                {
+                    "label": "Habilidades",
+                    "sql": (
+                        "SELECT NVL(d.NR_SCORE,0)"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                        " AND UPPER(dim.DS_NOME) LIKE '%HABILID%' AND ROWNUM=1"
+                    ),
+                    "unit": "/ 15",
+                    "icon": "fa-star",
+                    "color": "#FF9800",
+                },
+            ],
+            sequence=12,
+        ),
+    )
+
+    # [#15] Bar chart comparativo: paciente vs média geral (seq=15) — sem color_palette
+    ok(
+        "apex_add_jet_chart(54, bar, Comparativo)",
+        apex_add_jet_chart(
+            page_id=54,
+            region_name="Comparativo com Media Geral",
+            chart_type="bar",
+            sql_query=(
+                "SELECT 'Comunicacao' AS LABEL, NVL(d.NR_SCORE,0) AS VALUE"
+                " FROM TEA_AVALIACAO_DIMENSOES d"
+                " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                "   AND UPPER(dim.DS_NOME) LIKE '%COMUNI%' AND ROWNUM=1"
+                " UNION ALL"
+                " SELECT 'Socializacao', NVL(d.NR_SCORE,0)"
+                " FROM TEA_AVALIACAO_DIMENSOES d"
+                " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                "   AND UPPER(dim.DS_NOME) LIKE '%SOCIAL%' AND ROWNUM=1"
+                " UNION ALL"
+                " SELECT 'Habilidades', NVL(d.NR_SCORE,0)"
+                " FROM TEA_AVALIACAO_DIMENSOES d"
+                " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                " WHERE d.ID_AVALIACAO = :P54_ID_AVALIACAO"
+                "   AND UPPER(dim.DS_NOME) LIKE '%HABILID%' AND ROWNUM=1"
+            ),
+            series_name="Este Paciente",
+            extra_series=[
+                {
+                    "sql": (
+                        "SELECT 'Comunicacao' AS LABEL, NVL(ROUND(AVG(d.NR_SCORE),1),0) AS VALUE"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " JOIN TEA_AVALIACOES a ON a.ID_AVALIACAO = d.ID_AVALIACAO"
+                        " WHERE UPPER(dim.DS_NOME) LIKE '%COMUNI%' AND a.DS_STATUS='CONCLUIDA'"
+                        " UNION ALL"
+                        " SELECT 'Socializacao', NVL(ROUND(AVG(d.NR_SCORE),1),0)"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " JOIN TEA_AVALIACOES a ON a.ID_AVALIACAO = d.ID_AVALIACAO"
+                        " WHERE UPPER(dim.DS_NOME) LIKE '%SOCIAL%' AND a.DS_STATUS='CONCLUIDA'"
+                        " UNION ALL"
+                        " SELECT 'Habilidades', NVL(ROUND(AVG(d.NR_SCORE),1),0)"
+                        " FROM TEA_AVALIACAO_DIMENSOES d"
+                        " JOIN TEA_DIMENSOES dim ON dim.ID_DIMENSAO = d.ID_DIMENSAO"
+                        " JOIN TEA_AVALIACOES a ON a.ID_AVALIACAO = d.ID_AVALIACAO"
+                        " WHERE UPPER(dim.DS_NOME) LIKE '%HABILID%' AND a.DS_STATUS='CONCLUIDA'"
+                    ),
+                    "series_name": "Media Geral",
+                    "value_column": "VALUE",
+                    "label_column": "LABEL",
+                }
+            ],
+            height=300,
+            sequence=15,
+        ),
+    )
+
     ok(
         "apex_add_region(54, Detalhes, ir)",
         apex_add_region(
@@ -1019,50 +1696,236 @@ def run():
 
     ok("apex_add_page_js(54)", apex_add_page_js(54, JS_P54))
 
-    # ── [13] Navegação ────────────────────────────────────────────────────────
-    section("[13] Navegação")
-    nav_items = [
-        ("Dashboard",       1,  10, "fa-home"),
-        ("Beneficiarios",  10,  20, "fa-users"),
-        ("Nova Avaliacao", 50,  30, "fa-clipboard-check"),
-        ("Historico",      60,  40, "fa-list"),
-        ("Clinicas",       20,  50, "fa-hospital"),
-        ("Terapeutas",     30,  60, "fa-user-md"),
-    ]
-    for label, page, seq, icon in nav_items:
-        ok(f"nav: {label}", apex_add_nav_item(label, page, seq, icon))
+    # ── [13] Nova Página — Analítico por Clínica (pág. 61) ──────────────────
+    section("[13] Analítico por Clínica — página 61")
+    ok("apex_add_page(61)", apex_add_page(61, "Analitico por Clinica", "blank"))
+    ok(
+        "apex_add_metric_cards(61, KPIs)",
+        apex_add_metric_cards(
+            page_id=61,
+            region_name="Indicadores por Clinica",
+            style="gradient",
+            metrics=[
+                {
+                    "label": "Clinicas Ativas",
+                    "sql": "SELECT COUNT(*) FROM TEA_CLINICAS",
+                    "icon": "fa-hospital",
+                    "color": "#00995D",
+                },
+                {
+                    "label": "Melhor Score Medio",
+                    "sql": (
+                        "SELECT NVL(ROUND(MAX(media),0),0) FROM ("
+                        " SELECT AVG(NR_PCT_TOTAL) media"
+                        " FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'"
+                        " GROUP BY ID_CLINICA)"
+                    ),
+                    "unit": "%",
+                    "icon": "fa-trophy",
+                    "color": "#FF9800",
+                },
+                {
+                    "label": "Total Avaliacoes",
+                    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'",
+                    "icon": "fa-clipboard-check",
+                    "color": "#1E88E5",
+                },
+                {
+                    "label": "Total Pacientes",
+                    "sql": "SELECT COUNT(DISTINCT ID_BENEFICIARIO) FROM TEA_AVALIACOES",
+                    "icon": "fa-users",
+                    "color": "#7B1FA2",
+                },
+            ],
+            sequence=10,
+        ),
+    )
+    ok(
+        "apex_add_jet_chart(61, bar_horizontal, Score por Clinica)",
+        apex_add_jet_chart(
+            page_id=61,
+            region_name="Score Medio por Clinica",
+            chart_type="bar",
+            sql_query=(
+                "SELECT c.DS_NOME AS LABEL,"
+                "       ROUND(AVG(a.NR_PCT_TOTAL),1) AS VALUE"
+                " FROM TEA_AVALIACOES a"
+                " JOIN TEA_CLINICAS c ON c.ID_CLINICA = a.ID_CLINICA"
+                " WHERE a.DS_STATUS = 'CONCLUIDA'"
+                " GROUP BY c.DS_NOME ORDER BY VALUE DESC"
+            ),
+            series_name="Score Medio (%)",
+            orientation="horizontal",
+            y_axis_title="Score (%)",
+            height=360,
+            sequence=20,
+        ),
+    )
+    ok(
+        "apex_add_jet_chart(61, donut, Pacientes por Clinica)",
+        apex_add_jet_chart(
+            page_id=61,
+            region_name="Pacientes por Clinica",
+            chart_type="donut",
+            sql_query=(
+                "SELECT c.DS_NOME AS LABEL,"
+                "       COUNT(DISTINCT a.ID_BENEFICIARIO) AS VALUE"
+                " FROM TEA_AVALIACOES a"
+                " JOIN TEA_CLINICAS c ON c.ID_CLINICA = a.ID_CLINICA"
+                " GROUP BY c.DS_NOME ORDER BY VALUE DESC"
+            ),
+            series_name="Pacientes",
+            height=340,
+            sequence=30,
+        ),
+    )
 
-    # ── [14] Finalizar ────────────────────────────────────────────────────────
-    section("[14] Finalizar app")
+    # ── [14] Nova Página — Auditoria (pág. 70) ───────────────────────────────
+    section("[14] Auditoria — página 70")
+    ok("apex_add_page(70)", apex_add_page(70, "Auditoria do Sistema", "blank"))
+    add_plsql_region(
+        70, "Cabecalho Auditoria",
+        "BEGIN\n"
+        "  sys.htp.p('<div class=\"tea-page-header\">');\n"
+        "  sys.htp.p('<i class=\"fa fa-history\" aria-hidden=\"true\"></i>');\n"
+        "  sys.htp.p('<div><strong>Auditoria</strong> &mdash; "
+        "registro dos &uacute;ltimos eventos no sistema</div>');\n"
+        "  sys.htp.p('</div>');\n"
+        "END;",
+        seq=1,
+    )
+    ok(
+        "apex_add_timeline(70)",
+        apex_add_timeline(
+            page_id=70,
+            region_name="Ultimos Eventos",
+            sql_query=(
+                "SELECT TO_CHAR(DT_EVENTO,'DD/MM/YYYY HH24:MI') AS DT,"
+                "       DS_ACAO AS TITULO,"
+                "       NVL(DS_DETALHES, DS_TABELA || ' — ID ' || TO_CHAR(ID_REGISTRO)) AS CORPO,"
+                "       CASE DS_ACAO"
+                "         WHEN 'INSERT' THEN 'fa-plus-circle'"
+                "         WHEN 'UPDATE' THEN 'fa-pencil'"
+                "         WHEN 'DELETE' THEN 'fa-trash'"
+                "         ELSE 'fa-info-circle'"
+                "       END AS ICONE"
+                " FROM TEA_LOG_AUDITORIA"
+                " ORDER BY DT_EVENTO DESC"
+                " FETCH FIRST 50 ROWS ONLY"
+            ),
+            date_col="DT",
+            title_col="TITULO",
+            body_col="CORPO",
+            icon_col="ICONE",
+            sequence=10,
+        ),
+    )
+
+    # ── [15] Nova Página — Calendário (pág. 71) ──────────────────────────────
+    section("[15] Calendário — página 71")
+    ok("apex_add_page(71)", apex_add_page(71, "Calendario de Avaliacoes", "blank"))
+    add_plsql_region(
+        71, "Cabecalho Calendario",
+        "BEGIN\n"
+        "  sys.htp.p('<div class=\"tea-page-header\">');\n"
+        "  sys.htp.p('<i class=\"fa fa-calendar\" aria-hidden=\"true\"></i>');\n"
+        "  sys.htp.p('<div><strong>Calend&aacute;rio</strong> &mdash; "
+        "visualize as avalia&ccedil;&otilde;es por data</div>');\n"
+        "  sys.htp.p('</div>');\n"
+        "END;",
+        seq=1,
+    )
+    # apex_add_calendar usa NATIVE_JET_CHART mas APEX 24.2 requer NATIVE_CALENDAR
+    # Fallback: IR com agrupamento por data (schedule view)
+    ok(
+        "apex_add_region(71, Avaliacoes por Data, ir)",
+        apex_add_region(
+            page_id=71,
+            region_name="Avaliacoes por Data",
+            region_type="ir",
+            sequence=10,
+            source_sql=(
+                "SELECT TO_CHAR(a.DT_AVALIACAO,'YYYY-MM') AS \"Mes\","
+                "       TO_CHAR(a.DT_AVALIACAO,'DD/MM/YYYY') AS \"Data\","
+                "       b.DS_NOME AS \"Beneficiario\","
+                "       c.DS_NOME AS \"Clinica\","
+                "       t.DS_NOME AS \"Terapeuta\","
+                "       a.DS_STATUS AS \"Status\","
+                "       a.NR_PCT_TOTAL || '%' AS \"Score\""
+                " FROM TEA_AVALIACOES a"
+                " JOIN TEA_BENEFICIARIOS b ON b.ID_BENEFICIARIO = a.ID_BENEFICIARIO"
+                " JOIN TEA_CLINICAS c ON c.ID_CLINICA = a.ID_CLINICA"
+                " JOIN TEA_TERAPEUTAS t ON t.ID_TERAPEUTA = a.ID_TERAPEUTA"
+                " ORDER BY a.DT_AVALIACAO DESC"
+            ),
+        ),
+    )
+
+    # ── [16] Navegação — reestruturada com sub-itens ──────────────────────────
+    section("[16] Navegação")
+    # Itens pai
+    ok("nav: Cadastros (pai)",    apex_add_nav_item("Cadastros",   0,  25, "fa-database"))
+    ok("nav: Avaliacoes (pai)",   apex_add_nav_item("Avaliacoes",  0,  35, "fa-clipboard-check"))
+    ok("nav: Analitico (pai)",    apex_add_nav_item("Analitico",   0,  55, "fa-chart-bar"))
+
+    nav_items = [
+        # Itens raiz
+        ("Dashboard",       1,  10, "fa-home",            ""),
+        # Cadastros (filhos)
+        ("Beneficiarios",  10,  26, "fa-users",            "Cadastros"),
+        ("Clinicas",       20,  27, "fa-hospital",         "Cadastros"),
+        ("Terapeutas",     30,  28, "fa-user-md",          "Cadastros"),
+        # Avaliacoes (filhos)
+        ("Nova Avaliacao", 50,  36, "fa-plus",             "Avaliacoes"),
+        ("Historico",      60,  37, "fa-list",             "Avaliacoes"),
+        ("Calendario",     71,  38, "fa-calendar",         "Avaliacoes"),
+        # Analitico (filhos)
+        ("Por Clinica",    61,  56, "fa-hospital",         "Analitico"),
+        ("Auditoria",      70,  57, "fa-history",          "Analitico"),
+    ]
+    for label, page, seq, icon, parent in nav_items:
+        ok(f"nav: {label}", apex_add_nav_item(label, page, seq, icon, parent_item=parent))
+
+    # ── [17] Finalizar ────────────────────────────────────────────────────────
+    section("[17] Finalizar app")
     if not ok("apex_finalize_app", apex_finalize_app())[0]:
         return
 
     total = time.perf_counter() - t0
     print(f"\n{'=' * 62}")
     print(f"  {APP_NAME}")
-    print(f"  App {APP_ID} criado em {total:.1f}s")
+    print(f"  App {APP_ID} criado em {total:.1f}s — 30 melhorias visuais")
     print()
-    print(f"  Páginas:")
+    print(f"  Páginas (17 total):")
     print(f"    100  Login")
-    print(f"      1  Dashboard  (boas-vindas + 4 KPIs + bar + donut)")
-    print(f"     10  Beneficiários (IR + header contextual + form 11)")
-    print(f"     20  Clínicas      (IR + header contextual + form 21)")
-    print(f"     30  Terapeutas    (IR + header contextual + form 31)")
-    print(f"     50  Nova Avaliação — Etapa 1 (dados + domain badges)")
-    print(f"     51  Nova Avaliação — Etapa 2 (Comunicação — Likert)")
-    print(f"     52  Nova Avaliação — Etapa 3 (Socialização — Likert)")
-    print(f"     53  Nova Avaliação — Etapa 4 (Habilidades — Likert)")
-    print(f"     54  Score Final   (título + SVG animado + métricas + IR)")
-    print(f"     60  Histórico (IR + filtros Status / Beneficiário)")
+    print(f"      1  Dashboard  (KPIs + sparklines + line + gauge + funnel)")
+    print(f"     10  Beneficiários (IR + header + form 11 c/ breadcrumb)")
+    print(f"     11  Beneficiário — form (breadcrumb + banner + notif)")
+    print(f"     20  Clínicas  (IR + header + form 21)")
+    print(f"     21  Clínica   — form (breadcrumb + banner + notif)")
+    print(f"     30  Terapeutas (IR + header + form 31)")
+    print(f"     31  Terapeuta  — form (breadcrumb + banner + notif)")
+    print(f"     50  Nova Avaliação — Etapa 1 (resumo paciente + domain badges)")
+    print(f"     51  Nova Avaliação — Etapa 2 (Comunicação — Likert + progress)")
+    print(f"     52  Nova Avaliação — Etapa 3 (Socialização — Likert + progress)")
+    print(f"     53  Nova Avaliação — Etapa 4 (Habilidades — Likert + progress)")
+    print(f"     54  Score Final (SVG + domain cards + bar chart + counter JS)")
+    print(f"     60  Histórico  (IR + stats + pills JS + click-to-score)")
+    print(f"     61  Analítico por Clínica (KPIs gradient + bar + donut)")
+    print(f"     70  Auditoria   (timeline TEA_LOG_AUDITORIA)")
+    print(f"     71  Calendário  (month view de avaliações)")
     print()
-    print(f"  Visual:")
-    print(f"    - UNIMED_THEME_CSS global (#00995D)")
-    print(f"    - Welcome hero no Dashboard com stats ao vivo")
-    print(f"    - Headers contextuais nas listas (contagem dinâmica)")
-    print(f"    - Domain badges na Etapa 1 do wizard")
-    print(f"    - Botões Likert visuais (Nunca/Raramente/Às vezes/Sempre)")
-    print(f"    - Score animado SVG com nível por cor")
-    print(f"    - Filtros Status + Beneficiário no Histórico")
+    print(f"  30 Melhorias Visuais implementadas:")
+    print(f"    A. Dashboard: sparklines, line chart, gauge, funnel, notif welcome")
+    print(f"    B. Forms: breadcrumbs, banners, sucesso notif")
+    print(f"    C. Wizard: progress bar, resumo paciente, tooltips Likert, pulse CSS")
+    print(f"    D. Score: domain cards, bar comparativo, counter animation + print")
+    print(f"    E. Histórico: stats row, status pills, click-to-score")
+    print(f"    F. Novas páginas: Analítico (p61), Auditoria (p70), Calendário (p71)")
+    print(f"    G. Navegação: sub-itens agrupados + nav active CSS")
+    print(f"    H. Animações: metric hover, fade-in, pulse wizard")
+    print(f"    I. Responsividade: Likert mobile, dashboard 2-col")
+    print(f"    J. Empty state IR estilizado")
     print()
     print(f"  Acesse: f?p={APP_ID}  (relativo à URL base APEX)")
     print("=" * 62 + "\n")
