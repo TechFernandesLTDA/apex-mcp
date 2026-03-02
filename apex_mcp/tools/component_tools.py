@@ -280,7 +280,7 @@ def apex_add_item(
         item_id = ids.next(f"item_{page_id}_{item_name}")
 
         # Build optional parameter lines
-        lov_line = f",p_lov=>'{_esc(lov_name)}'" if lov_name else ""
+        lov_line = f",p_named_lov=>'{_esc(lov_name)}'" if lov_name else ""
         source_line = (
             f",p_source=>'{_esc(source_column)}'\n,p_source_type=>'DB_COLUMN'"
             if source_column else ""

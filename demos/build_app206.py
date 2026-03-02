@@ -32,7 +32,7 @@ os.environ.update({
 
 sys.path.insert(0, r"C:\Projetos\Apex\mcp-server")
 
-from apex_mcp.tools.sql_tools       import apex_connect
+from apex_mcp.tools.sql_tools       import apex_connect, apex_run_sql
 from apex_mcp.tools.app_tools       import (
     apex_list_apps, apex_create_app, apex_finalize_app, apex_delete_app,
 )
@@ -387,7 +387,7 @@ DECLARE
 BEGIN
   sys.htp.p('<div class="t-Form-fieldContainer">');
   BEGIN
-    SELECT valor INTO v_val FROM tea_config WHERE chave = 'ANTHROPIC_API_KEY';
+    SELECT DS_VALOR INTO v_val FROM tea_config WHERE DS_CHAVE = 'ANTHROPIC_API_KEY';
     sys.htp.p('<div class="t-Form-labelContainer"><label class="t-Form-label">Anthropic API Key</label></div>');
     sys.htp.p('<div class="t-Form-inputContainer">');
     sys.htp.p('<input type="text" class="text_field apex-item-text" value="****'||SUBSTR(v_val,-4)||'" readonly style="width:100%;max-width:400px">');
@@ -399,7 +399,7 @@ BEGIN
 
   sys.htp.p('<div class="t-Form-fieldContainer" style="margin-top:16px">');
   BEGIN
-    SELECT valor INTO v_val FROM tea_config WHERE chave = 'AI_MODEL';
+    SELECT DS_VALOR INTO v_val FROM tea_config WHERE DS_CHAVE = 'AI_MODEL';
     sys.htp.p('<div class="t-Form-labelContainer"><label class="t-Form-label">Modelo Ativo</label></div>');
     sys.htp.p('<div class="t-Form-inputContainer">');
     sys.htp.p('<input type="text" class="text_field apex-item-text" value="'||APEX_ESCAPE.HTML(v_val)||'" readonly style="width:100%;max-width:400px">');
@@ -473,7 +473,7 @@ BEGIN
 
   -- Log da interacao
   BEGIN
-    INSERT INTO TEA_LOG_AUDITORIA (DS_ACAO, DS_DETALHES, DS_USUARIO, DT_LOG)
+    INSERT INTO TEA_LOG_AUDITORIA (DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
     VALUES ('CHAT_IA', SUBSTR('P:'||l_mensagem||' R:'||SUBSTR(l_resposta,1,100),1,4000),
             :APP_USER, SYSTIMESTAMP);
     COMMIT;
@@ -540,7 +540,7 @@ BEGIN
   END;
 
   BEGIN
-    INSERT INTO TEA_LOG_AUDITORIA(DS_ACAO,DS_DETALHES,DS_USUARIO,DT_LOG)
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO,DS_DETALHES,DS_USUARIO,DT_OPERACAO)
     VALUES('ANALISE_IA','Avaliacao ID:'||l_id_aval||' Paciente:'||l_benefic,:APP_USER,SYSTIMESTAMP);
     COMMIT;
   EXCEPTION WHEN OTHERS THEN NULL; END;
@@ -595,7 +595,7 @@ BEGIN
   END;
 
   BEGIN
-    INSERT INTO TEA_LOG_AUDITORIA(DS_ACAO,DS_DETALHES,DS_USUARIO,DT_LOG)
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO,DS_DETALHES,DS_USUARIO,DT_OPERACAO)
     VALUES('RECOMEND_IA','Beneficiario ID:'||l_id_ben||' Nome:'||l_nome,:APP_USER,SYSTIMESTAMP);
     COMMIT;
   EXCEPTION WHEN OTHERS THEN NULL; END;
@@ -649,7 +649,7 @@ BEGIN
   END;
 
   BEGIN
-    INSERT INTO TEA_LOG_AUDITORIA(DS_ACAO,DS_DETALHES,DS_USUARIO,DT_LOG)
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO,DS_DETALHES,DS_USUARIO,DT_OPERACAO)
     VALUES('SELECT_AI',SUBSTR(l_pergunta,1,4000),:APP_USER,SYSTIMESTAMP);
     COMMIT;
   EXCEPTION WHEN OTHERS THEN NULL; END;
@@ -711,7 +711,7 @@ BEGIN
   END IF;
 
   BEGIN
-    INSERT INTO TEA_LOG_AUDITORIA(DS_ACAO,DS_DETALHES,DS_USUARIO,DT_LOG)
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO,DS_DETALHES,DS_USUARIO,DT_OPERACAO)
     VALUES('RAG_BUSCA',SUBSTR(l_query,1,4000),:APP_USER,SYSTIMESTAMP);
     COMMIT;
   EXCEPTION WHEN OTHERS THEN NULL; END;
@@ -1063,31 +1063,31 @@ def run():
         page_id=1,
         page_name="Dashboard IA",
         metrics=[
-            {"label": "Interacoes IA",    "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO LIKE '%IA%'", "icon": "fa-robot",       "color": "#00995D"},
-            {"label": "Chat Sessions",     "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO = 'CHAT_IA'", "icon": "fa-comments",    "color": "#1E88E5"},
-            {"label": "Analises Clinicas", "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO = 'ANALISE_IA'", "icon": "fa-stethoscope","color": "#43A047"},
+            {"label": "Interacoes IA",    "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO LIKE '%IA%'", "icon": "fa-robot",       "color": "#00995D"},
+            {"label": "Chat Sessions",     "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO = 'CHAT_IA'", "icon": "fa-comments",    "color": "#1E88E5"},
+            {"label": "Analises Clinicas", "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO = 'ANALISE_IA'", "icon": "fa-stethoscope","color": "#43A047"},
             {"label": "Docs na KB",        "sql": "SELECT COUNT(*) FROM TEA_CONHECIMENTO", "icon": "fa-book",        "color": "#8E24AA"},
         ],
         charts=[
             {
                 "title": "Atividade IA - 30 dias",
                 "type":  "bar",
-                "sql":   """SELECT TO_CHAR(TRUNC(DT_LOG),'DD/MM') AS "Dia",
+                "sql":   """SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') AS "Dia",
                                    COUNT(*) AS "Interacoes"
                               FROM TEA_LOG_AUDITORIA
-                             WHERE DT_LOG >= SYSDATE - 30
-                               AND DS_ACAO LIKE '%IA%'
-                             GROUP BY TRUNC(DT_LOG)
-                             ORDER BY TRUNC(DT_LOG)""",
+                             WHERE DT_OPERACAO >= SYSDATE - 30
+                               AND DS_OPERACAO LIKE '%IA%'
+                             GROUP BY TRUNC(DT_OPERACAO)
+                             ORDER BY TRUNC(DT_OPERACAO)""",
             },
             {
                 "title": "Tipos de Interacao",
                 "type":  "donut",
-                "sql":   """SELECT REPLACE(DS_ACAO,'_IA','') AS "Tipo",
+                "sql":   """SELECT REPLACE(DS_OPERACAO,'_IA','') AS "Tipo",
                                    COUNT(*) AS "Qtd"
                               FROM TEA_LOG_AUDITORIA
-                             WHERE DS_ACAO LIKE '%IA%'
-                             GROUP BY DS_ACAO
+                             WHERE DS_OPERACAO LIKE '%IA%'
+                             GROUP BY DS_OPERACAO
                              ORDER BY COUNT(*) DESC""",
             },
         ],
@@ -1262,24 +1262,24 @@ def run():
         page_id=60, region_name="Resumo de Uso IA",
         sequence=10, columns=4, style="gradient",
         metrics=[
-            {"label": "Total Interacoes",  "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO LIKE '%IA%'", "icon": "fa-bolt",      "color": "#00995D"},
-            {"label": "Chats",             "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO = 'CHAT_IA'", "icon": "fa-comments",  "color": "#1E88E5"},
-            {"label": "SQL Intelligence",  "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO = 'SELECT_AI'","icon": "fa-database",  "color": "#FB8C00"},
-            {"label": "Busca RAG",         "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_ACAO = 'RAG_BUSCA'","icon": "fa-search",    "color": "#8E24AA"},
+            {"label": "Total Interacoes",  "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO LIKE '%IA%'", "icon": "fa-bolt",      "color": "#00995D"},
+            {"label": "Chats",             "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO = 'CHAT_IA'", "icon": "fa-comments",  "color": "#1E88E5"},
+            {"label": "SQL Intelligence",  "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO = 'SELECT_AI'","icon": "fa-database",  "color": "#FB8C00"},
+            {"label": "Busca RAG",         "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO = 'RAG_BUSCA'","icon": "fa-search",    "color": "#8E24AA"},
         ],
     ))
     ok("region_log_ir", apex_add_region(
         page_id=60, region_name="Historico de Interacoes",
         region_type="ir", sequence=20,
         source_sql="""SELECT
-  DS_ACAO                                  AS "Acao",
+  DS_OPERACAO                                  AS "Acao",
   DS_USUARIO                               AS "Usuario",
-  TO_CHAR(DT_LOG,'DD/MM/YYYY HH24:MI:SS')  AS "Data/Hora",
+  TO_CHAR(DT_OPERACAO,'DD/MM/YYYY HH24:MI:SS')  AS "Data/Hora",
   SUBSTR(DS_DETALHES, 1, 200)              AS "Detalhes"
 FROM TEA_LOG_AUDITORIA
-WHERE DS_ACAO IN ('CHAT_IA','ANALISE_IA','RECOMEND_IA','SELECT_AI','RAG_BUSCA')
-   OR DS_ACAO LIKE '%IA%'
-ORDER BY DT_LOG DESC""",
+WHERE DS_OPERACAO IN ('CHAT_IA','ANALISE_IA','RECOMEND_IA','SELECT_AI','RAG_BUSCA')
+   OR DS_OPERACAO LIKE '%IA%'
+ORDER BY DT_OPERACAO DESC""",
     ))
 
     # ── [13] Configurações IA — pág. 70 ───────────────────────────────────────
@@ -1293,13 +1293,13 @@ ORDER BY DT_LOG DESC""",
     ok("chart_ia_by_day", apex_add_jet_chart(
         page_id=70, region_name="Uso IA - Ultimos 7 dias",
         chart_type="bar", sequence=20,
-        sql_query="""SELECT TO_CHAR(TRUNC(DT_LOG),'DD/MM') AS "Dia",
+        sql_query="""SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') AS "Dia",
                       COUNT(*) AS "Interacoes"
                  FROM TEA_LOG_AUDITORIA
-                WHERE DT_LOG >= SYSDATE - 7
-                  AND (DS_ACAO LIKE '%IA%' OR DS_ACAO = 'SELECT_AI' OR DS_ACAO = 'RAG_BUSCA')
-                GROUP BY TRUNC(DT_LOG)
-                ORDER BY TRUNC(DT_LOG)""",
+                WHERE DT_OPERACAO >= SYSDATE - 7
+                  AND (DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO = 'SELECT_AI' OR DS_OPERACAO = 'RAG_BUSCA')
+                GROUP BY TRUNC(DT_OPERACAO)
+                ORDER BY TRUNC(DT_OPERACAO)""",
         label_column="Dia", value_column="Interacoes",
     ))
 
@@ -1327,6 +1327,131 @@ ORDER BY DT_LOG DESC""",
     # ── [16] Validar ──────────────────────────────────────────────────────────
     section("[16] Validar app")
     ok("apex_validate_app", apex_validate_app(APP_ID))
+
+    # ── [17] Dados fictícios — Log IA + Base de Conhecimento ──────────────────
+    section("[17] Dados fictícios — Log IA + TEA_CONHECIMENTO")
+    ok("fake_log_ia", apex_run_sql("""
+BEGIN
+  -- Chats IA (10 registros, ultimos 30 dias)
+  FOR i IN 1..10 LOOP
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
+    VALUES('CHAT_IA',
+      CASE MOD(i,5)
+        WHEN 0 THEN 'Consulta sobre criterios ICHOM para avaliacao VINELAND'
+        WHEN 1 THEN 'Interpretacao de scores CBCL 6-18 acima do percentil 90'
+        WHEN 2 THEN 'Plano terapeutico individualizado para TEA nivel 2'
+        WHEN 3 THEN 'Protocolos de intervencao ABA para criancas 3-6 anos'
+        ELSE   'Duvida sobre preenchimento do formulario de avaliacao'
+      END,
+      CASE MOD(i,4) WHEN 0 THEN 'tera.01' WHEN 1 THEN 'tera.02'
+                    WHEN 2 THEN 'gestor.sp' ELSE 'cnu.admin' END,
+      SYSTIMESTAMP - INTERVAL '3' DAY * i);
+  END LOOP;
+  -- Analise IA (7 registros)
+  FOR i IN 1..7 LOOP
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
+    VALUES('ANALISE_IA',
+      'Avaliacao ID:' || (100 + i) || ' — analise clinica VINELAND gerada',
+      CASE MOD(i,2) WHEN 0 THEN 'tera.01' ELSE 'tera.03' END,
+      SYSTIMESTAMP - INTERVAL '4' DAY * i);
+  END LOOP;
+  -- Recomendacoes (6 registros)
+  FOR i IN 1..6 LOOP
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
+    VALUES('RECOMEND_IA',
+      'Beneficiario ID:' || (10 + i) || ' — plano terapeutico gerado',
+      CASE MOD(i,3) WHEN 0 THEN 'tera.02' WHEN 1 THEN 'gestor.rj' ELSE 'tera.04' END,
+      SYSTIMESTAMP - INTERVAL '5' DAY * i);
+  END LOOP;
+  -- SELECT AI (8 registros)
+  FOR i IN 1..8 LOOP
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
+    VALUES('SELECT_AI',
+      CASE MOD(i,4)
+        WHEN 0 THEN 'Quantos beneficiarios por clinica em Sao Paulo?'
+        WHEN 1 THEN 'Media de score VINELAND dos pacientes com TEA nivel 2'
+        WHEN 2 THEN 'Terapeutas com mais avaliacoes concluidas no trimestre'
+        ELSE        'Evolucao dos scores por beneficiario no ultimo ano'
+      END,
+      CASE MOD(i,3) WHEN 0 THEN 'cnu.admin' WHEN 1 THEN 'gestor.sp' ELSE 'tera.01' END,
+      SYSTIMESTAMP - INTERVAL '2' DAY * i);
+  END LOOP;
+  -- RAG Busca (5 registros)
+  FOR i IN 1..5 LOOP
+    INSERT INTO TEA_LOG_AUDITORIA(DS_OPERACAO, DS_DETALHES, DS_USUARIO, DT_OPERACAO)
+    VALUES('RAG_BUSCA',
+      CASE MOD(i,3)
+        WHEN 0 THEN 'protocolos TEA criancas 3-6 anos'
+        WHEN 1 THEN 'escala VINELAND comportamento adaptativo'
+        ELSE        'intervencao terapeutica ABA PECS comunicacao'
+      END,
+      CASE MOD(i,2) WHEN 0 THEN 'tera.03' ELSE 'gestor.bh' END,
+      SYSTIMESTAMP - INTERVAL '6' DAY * i);
+  END LOOP;
+  COMMIT;
+END;"""))
+
+    ok("fake_conhecimento", apex_run_sql("""
+BEGIN
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('DIAGNOSTICO','Criterios DSM-5 para TEA',
+    'O TEA requer: (A) Deficits na comunicacao e interacao social em multiplos contextos; '||
+    '(B) Padroes restritos e repetitivos de comportamento; (C) Sintomas presentes desde o '||
+    'periodo inicial do desenvolvimento; (D) Causam prejuizo clinicamente significativo. '||
+    'Especificadores: com/sem comprometimento intelectual, com/sem comprometimento de linguagem.',
+    1,'DSM-5 APA 2013','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('AVALIACAO','Escala VINELAND-3 — Guia de Interpretacao',
+    'Avalia comportamento adaptativo em 4 dominios: Comunicacao (receptiva, expressiva, escrita), '||
+    'Habilidades da Vida Diaria (pessoal, domestica, comunitaria), Socializacao (relacoes, '||
+    'jogos, coping) e Habilidades Motoras. Score medio padrao=100, DP=15. '||
+    'Classificacao: >=85 adequado, 70-84 limitrofe, <70 deficiente.',
+    1,'Vineland-3 Manual Tecnico Pearson','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('INTERVENCAO','ABA — Analise do Comportamento Aplicada',
+    'Intervencao mais validada para TEA. Principios: reforco positivo de comportamentos '||
+    'desejados, ensino por tentativas discretas (DTT), ensino naturalista (NET), '||
+    'generalizacao em ambientes reais. Intensidade recomendada: 20-40h/semana para '||
+    'TEA nivel 2-3. Evidencia nivel A (AHRQ).',
+    1,'Behavior Analyst Certification Board BACB','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('PADROES','ICHOM Standard Set TEA — Indicadores de Desfecho',
+    'Desfechos ICHOM para TEA: (1) Funcionalidade adaptativa — VINELAND-3 score global; '||
+    '(2) Qualidade de vida familiar — CFQL2; (3) Comportamentos desafiadores — RBS-R '||
+    'e CBCL 6-18. Medicao: baseline, 6 meses, 12 meses e anualmente. '||
+    'Permite comparacao entre clinicas e paises.',
+    1,'ICHOM TEA Working Group 2020','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('COMUNICACAO','PECS — Sistema de Comunicacao por Troca de Figuras',
+    'CAA para TEA com deficit de fala funcional. Fases: I (troca fisica), II (persistencia), '||
+    'III (discriminacao pictorial), IV (estrutura de sentenca com tira), '||
+    'V (resposta a ''O que voce quer?''), VI (comentarios espontaneos). '||
+    'Indicado para TEA niveis 2-3, nao-verbal ou com linguagem limitada.',
+    1,'Bondy & Frost 1994 PECS Protocol','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('FARMACOLOGIA','Farmacoterapia no TEA — Diretrizes',
+    'Nao ha farmaco que trate o TEA diretamente. Uso sinomatico: '||
+    'Risperidona/Aripiprazol (FDA) para irritabilidade grave; Metilfenidato para TDAH '||
+    'comorbido; SSRIs (fluoxetina) para ansiedade e comportamentos repetitivos; '||
+    'Melatonina para disturbios do sono. Sempre adjuvante as intervencoes comportamentais.',
+    1,'Pediatrics AAP Autism Guidelines 2020','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('CBCL','CBCL 6-18 — Child Behavior Checklist',
+    'Instrumento de rastreamento de problemas comportamentais e emocionais em criancas '||
+    '6-18 anos. Escalas de sindrome: Ansioso/Deprimido, Isolado/Deprimido, Queixas '||
+    'Somaticas, Problemas Sociais, Problemas de Pensamento, Problemas de Atencao, '||
+    'Comportamento de Quebrar Regras, Comportamento Agressivo. '||
+    'Escores T>=64 borderline, >=70 clinico.',
+    1,'Achenbach & Rescorla ASEBA 2001','S');
+  INSERT INTO TEA_CONHECIMENTO(DS_CATEGORIA,DS_TITULO,DS_CONTEUDO,NR_CHUNK,DS_FONTE,FL_ATIVO)
+  VALUES('PLANO','Estrutura do Plano de Intervencao TEA',
+    'Plano de intervencao individualizado (PII) deve conter: (1) Perfil funcional atual '||
+    '(scores VINELAND, CBCL, RBS-R); (2) Objetivos de curto prazo (3 meses) e longo prazo '||
+    '(12 meses); (3) Modalidades terapeuticas (ABA, fonoaudiologia, TO, psicologia); '||
+    '(4) Frequencia e intensidade por area; (5) Indicadores de progresso e revisao periodica.',
+    1,'Plataforma Desfecho TEA — Unimed Nacional','S');
+  COMMIT;
+END;"""))
 
     # ── Resumo ────────────────────────────────────────────────────────────────
     elapsed = time.perf_counter() - t0
