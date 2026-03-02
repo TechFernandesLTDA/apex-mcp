@@ -1070,25 +1070,25 @@ def run():
         ],
         charts=[
             {
-                "title": "Atividade IA - 30 dias",
-                "type":  "bar",
-                "sql":   """SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') AS "Dia",
-                                   COUNT(*) AS "Interacoes"
-                              FROM TEA_LOG_AUDITORIA
-                             WHERE DT_OPERACAO >= SYSDATE - 30
-                               AND DS_OPERACAO LIKE '%IA%'
-                             GROUP BY TRUNC(DT_OPERACAO)
-                             ORDER BY TRUNC(DT_OPERACAO)""",
+                "region_name": "Atividade IA - 30 dias",
+                "chart_type":  "bar",
+                "sql_query":   """SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') LABEL,
+                                         COUNT(*) VALUE
+                                    FROM TEA_LOG_AUDITORIA
+                                   WHERE DT_OPERACAO >= SYSDATE - 30
+                                     AND DS_OPERACAO LIKE '%IA%'
+                                   GROUP BY TRUNC(DT_OPERACAO)
+                                   ORDER BY TRUNC(DT_OPERACAO)""",
             },
             {
-                "title": "Tipos de Interacao",
-                "type":  "donut",
-                "sql":   """SELECT REPLACE(DS_OPERACAO,'_IA','') AS "Tipo",
-                                   COUNT(*) AS "Qtd"
-                              FROM TEA_LOG_AUDITORIA
-                             WHERE DS_OPERACAO LIKE '%IA%'
-                             GROUP BY DS_OPERACAO
-                             ORDER BY COUNT(*) DESC""",
+                "region_name": "Tipos de Interacao",
+                "chart_type":  "donut",
+                "sql_query":   """SELECT REPLACE(DS_OPERACAO,'_IA','') LABEL,
+                                         COUNT(*) VALUE
+                                    FROM TEA_LOG_AUDITORIA
+                                   WHERE DS_OPERACAO LIKE '%IA%'
+                                   GROUP BY DS_OPERACAO
+                                   ORDER BY COUNT(*) DESC""",
             },
         ],
     ))
@@ -1293,14 +1293,13 @@ ORDER BY DT_OPERACAO DESC""",
     ok("chart_ia_by_day", apex_add_jet_chart(
         page_id=70, region_name="Uso IA - Ultimos 7 dias",
         chart_type="bar", sequence=20,
-        sql_query="""SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') AS "Dia",
-                      COUNT(*) AS "Interacoes"
-                 FROM TEA_LOG_AUDITORIA
-                WHERE DT_OPERACAO >= SYSDATE - 7
-                  AND (DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO = 'SELECT_AI' OR DS_OPERACAO = 'RAG_BUSCA')
-                GROUP BY TRUNC(DT_OPERACAO)
-                ORDER BY TRUNC(DT_OPERACAO)""",
-        label_column="Dia", value_column="Interacoes",
+        sql_query="""SELECT TO_CHAR(TRUNC(DT_OPERACAO),'DD/MM') LABEL,
+                             COUNT(*) VALUE
+                        FROM TEA_LOG_AUDITORIA
+                       WHERE DT_OPERACAO >= SYSDATE - 7
+                         AND (DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO = 'SELECT_AI' OR DS_OPERACAO = 'RAG_BUSCA')
+                       GROUP BY TRUNC(DT_OPERACAO)
+                       ORDER BY TRUNC(DT_OPERACAO)""",
     ))
 
     # ── [14] Navegação — menu lateral ─────────────────────────────────────────
