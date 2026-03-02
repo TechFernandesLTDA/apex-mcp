@@ -127,6 +127,40 @@ from .tools.advanced_tools import (
     apex_add_chart_drilldown,
     apex_add_file_upload,
 )
+from .tools.ui_tools import (
+    apex_add_hero_banner,
+    apex_add_kpi_row,
+    apex_add_progress_tracker,
+    apex_add_alert_box,
+    apex_add_stat_delta,
+    apex_add_quick_links,
+    apex_add_leaderboard,
+    apex_add_tag_cloud,
+    apex_add_percent_bars,
+    apex_add_icon_list,
+    apex_add_traffic_light,
+    apex_add_spotlight_metric,
+    apex_add_comparison_panel,
+    apex_add_activity_stream,
+    apex_add_status_matrix,
+    apex_add_collapsible_region,
+    apex_add_tabs_container,
+    apex_add_data_card_grid,
+    apex_add_heatmap_grid,
+    apex_add_ribbon_stats,
+)
+from .tools.chart_tools import (
+    apex_add_stacked_chart,
+    apex_add_combo_chart,
+    apex_add_pareto_chart,
+    apex_add_scatter_plot,
+    apex_add_range_chart,
+    apex_add_area_chart,
+    apex_add_animated_counter,
+    apex_add_gradient_donut,
+    apex_add_mini_charts_row,
+    apex_add_bubble_chart,
+)
 
 # ── Server definition ─────────────────────────────────────────────────────────
 mcp = FastMCP(
@@ -433,12 +467,46 @@ mcp.tool()(apex_generate_docs)
 mcp.tool()(apex_begin_batch)
 mcp.tool()(apex_commit_batch)
 
+# UI Tools — 20 rich visual HTML components
+mcp.tool()(apex_add_hero_banner)
+mcp.tool()(apex_add_kpi_row)
+mcp.tool()(apex_add_progress_tracker)
+mcp.tool()(apex_add_alert_box)
+mcp.tool()(apex_add_stat_delta)
+mcp.tool()(apex_add_quick_links)
+mcp.tool()(apex_add_leaderboard)
+mcp.tool()(apex_add_tag_cloud)
+mcp.tool()(apex_add_percent_bars)
+mcp.tool()(apex_add_icon_list)
+mcp.tool()(apex_add_traffic_light)
+mcp.tool()(apex_add_spotlight_metric)
+mcp.tool()(apex_add_comparison_panel)
+mcp.tool()(apex_add_activity_stream)
+mcp.tool()(apex_add_status_matrix)
+mcp.tool()(apex_add_collapsible_region)
+mcp.tool()(apex_add_tabs_container)
+mcp.tool()(apex_add_data_card_grid)
+mcp.tool()(apex_add_heatmap_grid)
+mcp.tool()(apex_add_ribbon_stats)
+
+# Chart Tools — 10 advanced chart types
+mcp.tool()(apex_add_stacked_chart)
+mcp.tool()(apex_add_combo_chart)
+mcp.tool()(apex_add_pareto_chart)
+mcp.tool()(apex_add_scatter_plot)
+mcp.tool()(apex_add_range_chart)
+mcp.tool()(apex_add_area_chart)
+mcp.tool()(apex_add_animated_counter)
+mcp.tool()(apex_add_gradient_donut)
+mcp.tool()(apex_add_mini_charts_row)
+mcp.tool()(apex_add_bubble_chart)
+
 
 def main():
     """Entry point — supports stdio, streamable-http, and sse transports."""
     parser = argparse.ArgumentParser(
         prog="apex-mcp",
-        description="Oracle APEX MCP Server — 86 tools for APEX development via AI",
+        description="Oracle APEX MCP Server — 116 tools for APEX development via AI",
     )
     parser.add_argument(
         "--transport",
