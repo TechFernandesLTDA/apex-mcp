@@ -22,6 +22,8 @@ from apex_mcp.tools.generator_tools import apex_generate_login, apex_generate_da
 from apex_mcp.tools.component_tools import apex_add_region, apex_add_dynamic_action
 from apex_mcp.tools.shared_tools import apex_add_auth_scheme, apex_add_nav_item
 from apex_mcp.tools.js_tools import apex_generate_ajax_handler
+from apex_mcp.tools.ui_tools    import apex_add_stat_delta, apex_add_ribbon_stats, apex_add_activity_stream, apex_add_traffic_light
+from apex_mcp.tools.chart_tools import apex_add_animated_counter
 
 def ok(label, result_str):
     r = json.loads(result_str)
@@ -69,6 +71,33 @@ def run():
             {"label": "Config. Params",    "sql": "SELECT COUNT(*) FROM TEA_CONFIG",                                               "icon": "fa-cog",         "color": "red"},
         ]
     )): return
+
+    ok("stat_delta: variação", apex_add_stat_delta(
+        page_id=1, region_name="Variacao Sistema", sequence=20, columns=4,
+        metrics=[
+            {"label": "Usuários Ativos",   "icon": "fa-user",       "color": "blue",
+             "sql": "SELECT COUNT(*) FROM TEA_USUARIOS WHERE FL_ATIVO='S'",
+             "prev_sql": "SELECT COUNT(*) FROM TEA_USUARIOS WHERE FL_ATIVO='S' AND DT_CRIACAO < TRUNC(SYSDATE,'MM')"},
+            {"label": "Eventos Auditoria", "icon": "fa-file-text-o","color": "orange",
+             "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA",
+             "prev_sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DT_OPERACAO < TRUNC(SYSDATE,'MM')"},
+            {"label": "Clínicas Ativas",   "icon": "fa-hospital-o", "color": "green",
+             "sql": "SELECT COUNT(*) FROM TEA_CLINICAS WHERE FL_ATIVO='S'",
+             "prev_sql": "SELECT COUNT(*) FROM TEA_CLINICAS WHERE FL_ATIVO='S' AND DT_CRIACAO < TRUNC(SYSDATE,'MM')"},
+            {"label": "Params Config",     "icon": "fa-cog",        "color": "purple",
+             "sql": "SELECT COUNT(*) FROM TEA_CONFIG",
+             "prev_sql": "SELECT 0 FROM DUAL"},
+        ],
+    ))
+    ok("ribbon_stats: resumo adm", apex_add_ribbon_stats(
+        page_id=1, region_name="Resumo Administrativo", sequence=30,
+        metrics=[
+            {"label": "Terapeutas",   "sql": "SELECT COUNT(*) FROM TEA_TERAPEUTAS WHERE FL_ATIVO='S'", "icon": "fa-user-md",   "color": "teal"},
+            {"label": "Avaliações",   "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES",                    "icon": "fa-clipboard", "color": "blue"},
+            {"label": "Instrumentos", "sql": "SELECT COUNT(*) FROM TEA_PROVAS WHERE FL_ATIVO='S'",     "icon": "fa-list-alt",  "color": "orange"},
+            {"label": "Beneficiários","sql": "SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S'","icon": "fa-users",   "color": "indigo"},
+        ],
+    ))
 
     print("\n[6] CRUD Usuários (pages 10-11)...")
     if not ok("apex_generate_crud(TEA_USUARIOS)", apex_generate_crud("TEA_USUARIOS", 10, 11)): return
@@ -129,6 +158,25 @@ END;""",
         return
     print(f"  ✓  apex_generate_ajax_handler (process_id={rj.get('process_id')})")
 
+    ok("animated_counter: eventos p20", apex_add_animated_counter(
+        page_id=20, region_name="Total Eventos Auditoria",
+        sql_query="SELECT COUNT(*) FROM TEA_LOG_AUDITORIA",
+        label="Total de Eventos Registrados no Log",
+        color="orange", icon="fa-file-text-o", sequence=25,
+    ))
+    ok("activity_stream: interações recentes p20", apex_add_activity_stream(
+        page_id=20, region_name="Eventos Recentes",
+        sql_query=(
+            "SELECT DS_TABELA||' — '||DS_OPERACAO||' ('||NVL(DS_USUARIO,'sistema')||')' AS TEXT, "
+            "DT_OPERACAO AS DT "
+            "FROM TEA_LOG_AUDITORIA "
+            "ORDER BY DT_OPERACAO DESC FETCH FIRST 20 ROWS ONLY"
+        ),
+        text_column="TEXT", date_column="DT",
+        default_icon="fa-history", default_color="orange",
+        max_rows=20, sequence=30,
+    ))
+
     print("\n[9] Dynamic action: filtrar ao mudar P20_TABELA...")
     if not ok("apex_add_dynamic_action",
         apex_add_dynamic_action(
@@ -149,6 +197,16 @@ END;""",
        TO_CHAR(DT_CRIACAO,'DD/MM/YYYY HH24:MI') AS DT_CRIACAO
   FROM TEA_CONFIG
  ORDER BY DS_CHAVE""")): return
+
+    ok("traffic_light: status pacotes p30", apex_add_traffic_light(
+        page_id=30, region_name="Status dos Pacotes PL/SQL",
+        sql_query=(
+            "SELECT 'PKG_CLAUDE_API'   AS LABEL, CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_CLAUDE_API'   AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END AS STATUS FROM DUAL UNION ALL "
+            "SELECT 'PKG_TEA_AI',                    CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_TEA_AI'        AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END FROM DUAL UNION ALL "
+            "SELECT 'PKG_TEA_VECTOR',                CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_TEA_VECTOR'    AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END FROM DUAL"
+        ),
+        label_column="LABEL", status_column="STATUS", sequence=20,
+    ))
 
     print("\n[11] Navegação...")
     if not ok("nav: Dashboard",     apex_add_nav_item("Dashboard",    1,  10, "fa-home")): return
