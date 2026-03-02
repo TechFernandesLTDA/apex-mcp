@@ -661,7 +661,7 @@ def apex_add_sparkline(
   BEGIN
     EXECUTE IMMEDIATE 'SELECT NVL(MAX(VALUE),1) FROM ({_esc(trend_sql)})' INTO v_max;
     IF v_max = 0 THEN v_max := 1; END IF;
-    FOR r IN (SELECT VALUE FROM ({_esc(trend_sql)})) LOOP
+    FOR r IN (SELECT VALUE FROM ({trend_sql})) LOOP
       v_h := GREATEST(ROUND(r.VALUE / v_max * 34), 3);
       v_bars := v_bars || '<div class="mcp-spark-bar" style="height:' || v_h || 'px;background:{color}"></div>';
     END LOOP;
