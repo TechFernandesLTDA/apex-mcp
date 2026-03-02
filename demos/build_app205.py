@@ -60,6 +60,11 @@ from apex_mcp.tools.visual_tools    import (
 )
 from apex_mcp.tools.js_tools        import apex_add_page_js
 from apex_mcp.themes                import UNIMED_THEME_CSS
+from apex_mcp.tools.ui_tools        import (
+    apex_add_stat_delta, apex_add_spotlight_metric, apex_add_comparison_panel,
+    apex_add_percent_bars, apex_add_leaderboard,
+)
+from apex_mcp.tools.chart_tools     import apex_add_animated_counter
 
 APP_ID   = 205
 APP_NAME = "Plataforma TEA — Desfecho Clínico"
@@ -1251,6 +1256,53 @@ def run():
         ),
     )
 
+    # [#5a] Stat delta — variação mensal (seq=40)
+    ok(
+        "apex_add_stat_delta(1, variacao)",
+        apex_add_stat_delta(
+            page_id=1,
+            region_name="Variacao Mensal",
+            sequence=40,
+            columns=4,
+            metrics=[
+                {
+                    "label": "Avaliações Concluídas", "icon": "fa-check-circle", "color": "green",
+                    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'",
+                    "prev_sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')",
+                },
+                {
+                    "label": "Em Andamento", "icon": "fa-spinner", "color": "orange",
+                    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='EM_ANDAMENTO'",
+                    "prev_sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='EM_ANDAMENTO' AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')",
+                },
+                {
+                    "label": "Score Médio (%)", "icon": "fa-bar-chart", "color": "purple", "suffix": "%",
+                    "sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0",
+                    "prev_sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0 AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')",
+                },
+                {
+                    "label": "Terapeutas Ativos", "icon": "fa-user-md", "color": "teal",
+                    "sql": "SELECT COUNT(*) FROM TEA_TERAPEUTAS WHERE FL_ATIVO='S'",
+                    "prev_sql": "SELECT COUNT(*) FROM TEA_TERAPEUTAS WHERE FL_ATIVO='S' AND DT_CRIACAO < TRUNC(SYSDATE,'MM')",
+                },
+            ],
+        ),
+    )
+
+    # [#5b] Animated counter — total beneficiários (seq=45)
+    ok(
+        "apex_add_animated_counter(1, beneficiarios)",
+        apex_add_animated_counter(
+            page_id=1,
+            region_name="Total Beneficiarios",
+            sql_query="SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S'",
+            label="Beneficiários Ativos na Plataforma",
+            color="unimed",
+            icon="fa-users",
+            sequence=45,
+        ),
+    )
+
     # ── [6] CRUD Beneficiários (págs. 10 / 11) ───────────────────────────────
     section("[6] CRUD Beneficiários — páginas 10 / 11")
     ok("apex_generate_crud(TEA_BENEFICIARIOS)", apex_generate_crud("TEA_BENEFICIARIOS", 10, 11))
@@ -1696,6 +1748,46 @@ def run():
 
     ok("apex_add_page_js(54)", apex_add_page_js(54, JS_P54))
 
+    # [#12a] Spotlight metric — score médio geral (seq=40)
+    ok(
+        "apex_add_spotlight_metric(54, score medio)",
+        apex_add_spotlight_metric(
+            page_id=54,
+            region_name="Score Medio Geral",
+            sql_query="SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL > 0",
+            label="Score Médio Geral da Plataforma",
+            color="unimed",
+            icon="fa-trophy",
+            suffix="%",
+            subtitle_sql="SELECT 'Base: '||COUNT(*)||' avaliações concluídas' FROM TEA_AVALIACOES WHERE DS_STATUS=''CONCLUIDA''",
+            sequence=40,
+        ),
+    )
+
+    # [#12b] Comparison panel — mês atual vs. anterior (seq=50)
+    ok(
+        "apex_add_comparison_panel(54, mes atual vs anterior)",
+        apex_add_comparison_panel(
+            page_id=54,
+            region_name="Mes Atual vs Anterior",
+            left_label="Mês Atual",
+            right_label="Mês Anterior",
+            left_color="green",
+            right_color="blue",
+            sequence=50,
+            left_metrics=[
+                {"label": "Avaliações",    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DT_AVALIACAO >= TRUNC(SYSDATE,'MM')"},
+                {"label": "Concluídas",    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' AND DT_AVALIACAO >= TRUNC(SYSDATE,'MM')"},
+                {"label": "Score Médio",   "sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0 AND DT_AVALIACAO >= TRUNC(SYSDATE,'MM')", "suffix": "%"},
+            ],
+            right_metrics=[
+                {"label": "Avaliações",    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DT_AVALIACAO >= ADD_MONTHS(TRUNC(SYSDATE,'MM'),-1) AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')"},
+                {"label": "Concluídas",    "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' AND DT_AVALIACAO >= ADD_MONTHS(TRUNC(SYSDATE,'MM'),-1) AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')"},
+                {"label": "Score Médio",   "sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0 AND DT_AVALIACAO >= ADD_MONTHS(TRUNC(SYSDATE,'MM'),-1) AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')", "suffix": "%"},
+            ],
+        ),
+    )
+
     # ── [13] Nova Página — Analítico por Clínica (pág. 61) ──────────────────
     section("[13] Analítico por Clínica — página 61")
     ok("apex_add_page(61)", apex_add_page(61, "Analitico por Clinica", "blank"))
@@ -1777,6 +1869,36 @@ def run():
             series_name="Pacientes",
             height=340,
             sequence=30,
+        ),
+    )
+
+    # [#13a] Percent bars — avaliações por status (seq=40)
+    ok(
+        "apex_add_percent_bars(61, status)",
+        apex_add_percent_bars(
+            page_id=61,
+            region_name="Avaliacoes por Status",
+            sql_query="SELECT DS_STATUS AS LABEL, COUNT(*) AS VALUE FROM TEA_AVALIACOES GROUP BY DS_STATUS ORDER BY 2 DESC",
+            color="unimed",
+            sequence=40,
+        ),
+    )
+
+    # [#13b] Leaderboard — top terapeutas (seq=50)
+    ok(
+        "apex_add_leaderboard(61, top terapeutas)",
+        apex_add_leaderboard(
+            page_id=61,
+            region_name="Ranking de Terapeutas",
+            sql_query=(
+                "SELECT t.DS_NOME AS LABEL, COUNT(a.ID_AVALIACAO) AS VALUE "
+                "FROM TEA_TERAPEUTAS t "
+                "LEFT JOIN TEA_AVALIACOES a ON a.ID_TERAPEUTA = t.ID_TERAPEUTA "
+                "GROUP BY t.DS_NOME ORDER BY 2 DESC FETCH FIRST 8 ROWS ONLY"
+            ),
+            color="unimed",
+            max_rows=8,
+            sequence=50,
         ),
     )
 

@@ -41,6 +41,7 @@ from apex_mcp.tools.app_tools      import apex_create_app, apex_finalize_app
 from apex_mcp.tools.generator_tools import apex_generate_login
 from apex_mcp.tools.advanced_tools  import apex_generate_from_schema, apex_validate_app
 from apex_mcp.tools.shared_tools    import apex_add_auth_scheme
+from apex_mcp.tools.ui_tools       import apex_add_hero_banner, apex_add_ribbon_stats
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -161,6 +162,36 @@ def run():
             print(f"    · {line}")
     else:
         return
+
+    # Hero banner — cabeçalho do backoffice
+    ok("hero_banner: dashboard p1", apex_add_hero_banner(
+        page_id=1,
+        title="TEA Backoffice — Gestão de Dados Clínicos",
+        subtitle="Plataforma Desfecho TEA | Unimed Nacional | Gerado automaticamente por apex-mcp",
+        bg_color="unimed",
+        stats=[
+            {"label": "Beneficiários",   "sql": "SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S'"},
+            {"label": "Avaliações",      "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES"},
+            {"label": "Clínicas",        "sql": "SELECT COUNT(*) FROM TEA_CLINICAS WHERE FL_ATIVO='S'"},
+            {"label": "Usuários Ativos", "sql": "SELECT COUNT(*) FROM TEA_USUARIOS WHERE FL_ATIVO='S'"},
+        ],
+        button_label="Nova Avaliação",
+        button_url="f?p=&APP_ID.:12:&SESSION..",
+        sequence=5,
+    ))
+
+    # Ribbon stats — resumo compacto
+    ok("ribbon_stats: dashboard p1", apex_add_ribbon_stats(
+        page_id=1,
+        region_name="Resumo Operacional",
+        sequence=50,
+        metrics=[
+            {"label": "Instrumentos",    "sql": "SELECT COUNT(*) FROM TEA_PROVAS WHERE FL_ATIVO='S'",      "icon": "fa-list-alt",   "color": "orange"},
+            {"label": "Dimensões",       "sql": "SELECT COUNT(*) FROM TEA_DIMENSOES",                      "icon": "fa-sliders",    "color": "blue"},
+            {"label": "Perfis",          "sql": "SELECT COUNT(*) FROM TEA_PERFIS",                         "icon": "fa-id-badge",   "color": "purple"},
+            {"label": "Score Médio (%)", "sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0", "icon": "fa-bar-chart", "color": "green"},
+        ],
+    ))
 
     # ── 4. Finalizar + validar ────────────────────────────────────────────────
     section("4/4  Finalizar e validar")

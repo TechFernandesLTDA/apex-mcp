@@ -50,6 +50,11 @@ from apex_mcp.tools.visual_tools    import (
 )
 from apex_mcp.tools.js_tools        import apex_add_page_js
 from apex_mcp.themes                import UNIMED_THEME_CSS
+from apex_mcp.tools.ui_tools        import (
+    apex_add_hero_banner, apex_add_ribbon_stats,
+    apex_add_activity_stream, apex_add_traffic_light,
+)
+from apex_mcp.tools.chart_tools     import apex_add_pareto_chart, apex_add_animated_counter
 
 APP_ID   = 206
 APP_NAME = "Centro IA — Plataforma TEA"
@@ -1097,6 +1102,45 @@ def run():
         sequence=50, source_sql=DASHBOARD_TILES, template="0",
     ))
 
+    # Hero banner — identidade do AI Hub
+    ok("hero_banner(1)", apex_add_hero_banner(
+        page_id=1,
+        title="Centro IA — Plataforma TEA",
+        subtitle="Inteligência Artificial integrada: Claude API · PKG_TEA_AI · SELECT AI · RAG Vetorial",
+        bg_color="navy",
+        stats=[
+            {"label": "Interações IA",  "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO LIKE '%IA%'"},
+            {"label": "Chats Claude",   "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='CHAT_IA'"},
+            {"label": "Análises IA",    "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='ANALISE_IA'"},
+            {"label": "Buscas RAG",     "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='RAG_BUSCA'"},
+        ],
+        sequence=60,
+    ))
+
+    # Animated counter — total de interações IA
+    ok("animated_counter(1, interacoes)", apex_add_animated_counter(
+        page_id=1,
+        region_name="Total Interacoes IA",
+        sql_query="SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO LIKE '%IA%'",
+        label="Total de Interações com IA na Plataforma",
+        color="indigo",
+        icon="fa-bolt",
+        sequence=70,
+    ))
+
+    # Ribbon stats — resumo dos motores IA
+    ok("ribbon_stats(1)", apex_add_ribbon_stats(
+        page_id=1,
+        region_name="Status Motores IA",
+        sequence=80,
+        metrics=[
+            {"label": "PKG_CLAUDE_API",   "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='CHAT_IA'",       "icon": "fa-comments",  "color": "blue"},
+            {"label": "SELECT AI",        "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='SELECT_AI'",     "icon": "fa-database",  "color": "teal"},
+            {"label": "RAG Vetorial",     "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='RAG_BUSCA'",     "icon": "fa-search",    "color": "purple"},
+            {"label": "Recomendações",    "sql": "SELECT COUNT(*) FROM TEA_LOG_AUDITORIA WHERE DS_OPERACAO='RECOMEND_IA'",   "icon": "fa-lightbulb-o","color": "orange"},
+        ],
+    ))
+
     # ── [7] Chat com Claude — pág. 10 ─────────────────────────────────────────
     section("[7] Chat com Claude — página 10")
     ok("apex_add_page(10)", apex_add_page(page_id=10, page_name="Chat com Claude"))
@@ -1282,6 +1326,41 @@ WHERE DS_OPERACAO IN ('CHAT_IA','ANALISE_IA','RECOMEND_IA','SELECT_AI','RAG_BUSC
 ORDER BY DT_OPERACAO DESC""",
     ))
 
+    # Activity stream — feed de interações recentes
+    ok("activity_stream(60)", apex_add_activity_stream(
+        page_id=60,
+        region_name="Interacoes Recentes IA",
+        sql_query=(
+            "SELECT DS_OPERACAO||' — '||NVL(DS_USUARIO,'sistema') AS TEXT, "
+            "DT_OPERACAO AS DT "
+            "FROM TEA_LOG_AUDITORIA "
+            "WHERE DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO='SELECT_AI' OR DS_OPERACAO='RAG_BUSCA' "
+            "ORDER BY DT_OPERACAO DESC FETCH FIRST 20 ROWS ONLY"
+        ),
+        text_column="TEXT",
+        date_column="DT",
+        default_icon="fa-bolt",
+        default_color="blue",
+        max_rows=20,
+        sequence=30,
+    ))
+
+    # Pareto — operações IA por tipo
+    ok("pareto_chart(60)", apex_add_pareto_chart(
+        page_id=60,
+        region_name="Pareto — Operacoes IA por Tipo",
+        sql_query=(
+            "SELECT DS_OPERACAO AS LABEL, COUNT(*) AS VALUE "
+            "FROM TEA_LOG_AUDITORIA "
+            "WHERE DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO='SELECT_AI' OR DS_OPERACAO='RAG_BUSCA' "
+            "GROUP BY DS_OPERACAO ORDER BY 2 DESC"
+        ),
+        bar_name="Quantidade",
+        line_name="Acumulado %",
+        height=360,
+        sequence=40,
+    ))
+
     # ── [13] Configurações IA — pág. 70 ───────────────────────────────────────
     section("[13] Configurações IA — página 70")
     ok("apex_add_page(70)", apex_add_page(page_id=70, page_name="Configuracoes IA"))
@@ -1300,6 +1379,32 @@ ORDER BY DT_OPERACAO DESC""",
                          AND (DS_OPERACAO LIKE '%IA%' OR DS_OPERACAO = 'SELECT_AI' OR DS_OPERACAO = 'RAG_BUSCA')
                        GROUP BY TRUNC(DT_OPERACAO)
                        ORDER BY TRUNC(DT_OPERACAO)""",
+    ))
+
+    # Traffic light — status dos componentes IA
+    ok("traffic_light(70)", apex_add_traffic_light(
+        page_id=70,
+        region_name="Status dos Componentes IA",
+        sql_query=(
+            "SELECT 'PKG_CLAUDE_API' AS LABEL, "
+            "CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_CLAUDE_API' AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END AS STATUS "
+            "FROM DUAL UNION ALL "
+            "SELECT 'PKG_TEA_AI', "
+            "CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_TEA_AI' AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END "
+            "FROM DUAL UNION ALL "
+            "SELECT 'PKG_TEA_VECTOR', "
+            "CASE WHEN EXISTS (SELECT 1 FROM ALL_OBJECTS WHERE OBJECT_NAME='PKG_TEA_VECTOR' AND STATUS='VALID') THEN 'GREEN' ELSE 'RED' END "
+            "FROM DUAL UNION ALL "
+            "SELECT 'TEA_LOG_AUDITORIA', "
+            "CASE WHEN EXISTS (SELECT 1 FROM ALL_TABLES WHERE TABLE_NAME='TEA_LOG_AUDITORIA') THEN 'GREEN' ELSE 'RED' END "
+            "FROM DUAL UNION ALL "
+            "SELECT 'TEA_CONHECIMENTO (RAG)', "
+            "CASE WHEN (SELECT COUNT(*) FROM TEA_CONHECIMENTO WHERE FL_ATIVO='S') > 0 THEN 'GREEN' ELSE 'AMBER' END "
+            "FROM DUAL"
+        ),
+        label_column="LABEL",
+        status_column="STATUS",
+        sequence=30,
     ))
 
     # ── [14] Navegação — menu lateral ─────────────────────────────────────────

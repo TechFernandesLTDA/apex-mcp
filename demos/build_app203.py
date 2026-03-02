@@ -21,6 +21,8 @@ from apex_mcp.tools.page_tools import apex_add_page
 from apex_mcp.tools.generator_tools import apex_generate_login
 from apex_mcp.tools.visual_tools import apex_add_jet_chart, apex_add_metric_cards, apex_generate_analytics_page
 from apex_mcp.tools.shared_tools import apex_add_nav_item
+from apex_mcp.tools.ui_tools    import apex_add_stat_delta, apex_add_leaderboard, apex_add_percent_bars, apex_add_ribbon_stats
+from apex_mcp.tools.chart_tools import apex_add_pareto_chart
 
 
 def ok(label, result_str):
@@ -133,6 +135,49 @@ def run():
     ))
     if not ok_flag: return
 
+    # Stat delta — variação mensal de métricas chave
+    ok("stat_delta: variação", apex_add_stat_delta(
+        page_id=1,
+        region_name="Variação Mensal",
+        sequence=40,
+        columns=4,
+        metrics=[
+            {
+                "label": "Beneficiários Ativos", "icon": "fa-users", "color": "blue",
+                "sql": "SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S'",
+                "prev_sql": "SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S' AND DT_CRIACAO < TRUNC(SYSDATE,'MM')",
+            },
+            {
+                "label": "Avaliações Concluídas", "icon": "fa-check-circle", "color": "green",
+                "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA'",
+                "prev_sql": "SELECT COUNT(*) FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')",
+            },
+            {
+                "label": "Score Médio (%)", "icon": "fa-bar-chart", "color": "purple", "suffix": "%",
+                "sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0",
+                "prev_sql": "SELECT ROUND(AVG(NR_PCT_TOTAL),1) FROM TEA_AVALIACOES WHERE NR_PCT_TOTAL>0 AND DT_AVALIACAO < TRUNC(SYSDATE,'MM')",
+            },
+            {
+                "label": "Clínicas Ativas", "icon": "fa-hospital-o", "color": "teal",
+                "sql": "SELECT COUNT(*) FROM TEA_CLINICAS WHERE FL_ATIVO='S'",
+                "prev_sql": "SELECT COUNT(*) FROM TEA_CLINICAS WHERE FL_ATIVO='S' AND DT_CRIACAO < TRUNC(SYSDATE,'MM')",
+            },
+        ],
+    ))
+
+    # Ribbon stats — resumo compacto
+    ok("ribbon_stats: resumo", apex_add_ribbon_stats(
+        page_id=1,
+        region_name="Resumo Geral",
+        sequence=50,
+        metrics=[
+            {"label": "Avaliações",   "sql": "SELECT COUNT(*) FROM TEA_AVALIACOES",                              "icon": "fa-clipboard", "color": "blue"},
+            {"label": "Instrumentos", "sql": "SELECT COUNT(*) FROM TEA_PROVAS WHERE FL_ATIVO='S'",               "icon": "fa-list-alt",  "color": "orange"},
+            {"label": "Terapeutas",   "sql": "SELECT COUNT(*) FROM TEA_TERAPEUTAS WHERE FL_ATIVO='S'",           "icon": "fa-user-md",   "color": "indigo"},
+            {"label": "Pacientes",    "sql": "SELECT COUNT(*) FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S'",        "icon": "fa-users",     "color": "green"},
+        ],
+    ))
+
     # ─── Página 2: Tendências com Line/Area Charts ─────────────────────────────
     print("\n[5] Página 2 — Tendências com line/area charts...")
     if not ok("apex_add_page(2)", apex_add_page(2, "Tendências", "blank"))[0]: return
@@ -228,6 +273,42 @@ def run():
     ))
     if not ok_flag: return
 
+    # Leaderboard — top terapeutas por avaliações
+    ok("leaderboard: top terapeutas", apex_add_leaderboard(
+        page_id=2,
+        region_name="Ranking de Terapeutas",
+        sql_query=(
+            "SELECT t.DS_NOME AS LABEL, COUNT(a.ID_AVALIACAO) AS VALUE "
+            "FROM TEA_TERAPEUTAS t "
+            "LEFT JOIN TEA_AVALIACOES a ON a.ID_TERAPEUTA = t.ID_TERAPEUTA "
+            "GROUP BY t.DS_NOME ORDER BY 2 DESC FETCH FIRST 8 ROWS ONLY"
+        ),
+        color="unimed",
+        max_rows=8,
+        sequence=40,
+    ))
+
+    # Percent bars — beneficiários por faixa etária
+    ok("percent_bars: faixa etária", apex_add_percent_bars(
+        page_id=2,
+        region_name="Beneficiários por Faixa Etária",
+        sql_query=(
+            "SELECT CASE "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 6  THEN '0-5 anos' "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 12 THEN '6-11 anos' "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 18 THEN '12-17 anos' "
+            "  ELSE '18+ anos' END AS LABEL, COUNT(*) AS VALUE "
+            "FROM TEA_BENEFICIARIOS WHERE FL_ATIVO='S' "
+            "GROUP BY CASE "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 6  THEN '0-5 anos' "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 12 THEN '6-11 anos' "
+            "  WHEN MONTHS_BETWEEN(SYSDATE,DT_NASCIMENTO)/12 < 18 THEN '12-17 anos' "
+            "  ELSE '18+ anos' END ORDER BY 1"
+        ),
+        color="teal",
+        sequence=50,
+    ))
+
     # ─── Página 3: Analytics gerada pelo apex_generate_analytics_page ─────────
     print("\n[6] Página 3 — Analytics completa (apex_generate_analytics_page)...")
     ok_flag, _ = ok("apex_generate_analytics_page", apex_generate_analytics_page(
@@ -287,6 +368,22 @@ def run():
         ],
     ))
     if not ok_flag: return
+
+    # Pareto — avaliações por instrumento (página 3 extra)
+    ok("pareto: avaliações por instrumento (p3)", apex_add_pareto_chart(
+        page_id=3,
+        region_name="Pareto — Volume por Instrumento",
+        sql_query=(
+            "SELECT p.DS_NOME AS LABEL, COUNT(a.ID_AVALIACAO) AS VALUE "
+            "FROM TEA_PROVAS p "
+            "LEFT JOIN TEA_AVALIACOES a ON a.ID_PROVA = p.ID_PROVA "
+            "WHERE p.FL_ATIVO='S' GROUP BY p.DS_NOME ORDER BY 2 DESC"
+        ),
+        bar_name="Avaliações",
+        line_name="Acumulado %",
+        height=380,
+        sequence=40,
+    ))
 
     # ─── Navegação ─────────────────────────────────────────────────────────────
     print("\n[7] Navegação...")
