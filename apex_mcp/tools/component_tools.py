@@ -280,7 +280,14 @@ def apex_add_item(
         item_id = ids.next(f"item_{page_id}_{item_name}")
 
         # Build optional parameter lines
-        lov_line = f",p_named_lov=>'{_esc(lov_name)}'" if lov_name else ""
+        # p_lov for inline SQL queries; p_named_lov for shared/named LOVs
+        _lov_up = lov_name.strip().upper() if lov_name else ""
+        if _lov_up.startswith("SELECT") or _lov_up.startswith("WITH"):
+            lov_line = f",p_lov=>'{_esc(lov_name)}'"
+        elif lov_name:
+            lov_line = f",p_named_lov=>'{_esc(lov_name)}'"
+        else:
+            lov_line = ""
         source_line = (
             f",p_source=>'{_esc(source_column)}'\n,p_source_type=>'DB_COLUMN'"
             if source_column else ""

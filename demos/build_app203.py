@@ -177,7 +177,8 @@ def run():
     ok_flag, _ = ok("apex_add_jet_chart(bar_horizontal: terapeutas)", apex_add_jet_chart(
         page_id=2,
         region_name="Top Terapeutas por Avaliações",
-        chart_type="bar_horizontal",
+        chart_type="bar",
+        orientation="horizontal",
         sql_query=(
             "SELECT t.DS_NOME AS LABEL, COUNT(a.ID_AVALIACAO) AS VALUE "
             "FROM TEA_TERAPEUTAS t "
