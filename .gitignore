@@ -13,8 +13,10 @@ build/
 venv/
 env/
 
-# IDE
-.vscode/
+# IDE — ignore settings but track MCP configs
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
 .idea/
 *.swp
 *.swo

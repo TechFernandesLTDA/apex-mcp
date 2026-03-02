@@ -1,15 +1,27 @@
 """Oracle APEX MCP Server — Entry Point.
 
 FastMCP server exposing tools to create, inspect, and modify Oracle APEX 24.2
-applications via natural language through Claude Code.
+applications via natural language. Supports Claude, GPT, Gemini, Cursor, VS Code,
+and any MCP-compatible AI client.
 
 Usage:
-    python -m apex_mcp.server        # stdio mode (for MCP clients)
-    python -m apex_mcp.server --help # show options
+    python -m apex_mcp                                    # stdio (default)
+    python -m apex_mcp --transport streamable-http        # HTTP on 127.0.0.1:8000
+    python -m apex_mcp --transport sse --port 9000        # SSE on port 9000
+    apex-mcp --help                                       # show all options
+
+Environment variable overrides (lower priority than CLI flags):
+    MCP_TRANSPORT   stdio | streamable-http | sse
+    MCP_HOST        default 127.0.0.1
+    MCP_PORT        default 8000
+    MCP_PATH        endpoint path (streamable-http: /mcp, sse: /sse)
 """
 from __future__ import annotations
 
+import argparse
 import logging
+import os
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 
 import fastmcp
@@ -423,8 +435,44 @@ mcp.tool()(apex_commit_batch)
 
 
 def main():
-    """Entry point for stdio MCP server."""
-    mcp.run(transport="stdio")
+    """Entry point — supports stdio, streamable-http, and sse transports."""
+    parser = argparse.ArgumentParser(
+        prog="apex-mcp",
+        description="Oracle APEX MCP Server — 86 tools for APEX development via AI",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http", "sse"],
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        help="Transport mode (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("MCP_HOST", "127.0.0.1"),
+        help="Host to bind for HTTP transports (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MCP_PORT", "8000")),
+        help="Port to bind for HTTP transports (default: 8000)",
+    )
+    parser.add_argument(
+        "--path",
+        default=os.environ.get("MCP_PATH", None),
+        help="Endpoint path (streamable-http default: /mcp, sse default: /sse)",
+    )
+
+    args = parser.parse_args()
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+    elif args.transport == "streamable-http":
+        path = args.path or "/mcp"
+        mcp.run(transport="streamable-http", host=args.host, port=args.port, path=path)
+    elif args.transport == "sse":
+        path = args.path or "/sse"
+        mcp.run(transport="sse", host=args.host, port=args.port, path=path)
 
 
 if __name__ == "__main__":

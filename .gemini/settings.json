@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "apex-mcp": {
+      "command": "python",
+      "args": ["-m", "apex_mcp"],
+      "env": {
+        "ORACLE_DB_USER": "YOUR_SCHEMA",
+        "ORACLE_DB_PASS": "YOUR_PASSWORD",
+        "ORACLE_DSN": "YOUR_DSN",
+        "ORACLE_WALLET_DIR": "/path/to/wallet",
+        "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+        "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+        "APEX_SCHEMA": "YOUR_SCHEMA",
+        "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+      }
+    }
+  }
+}
