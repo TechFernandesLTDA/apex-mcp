@@ -1,12 +1,12 @@
 """Tools: apex_setup_guide, apex_check_requirements, apex_check_permissions."""
 from __future__ import annotations
-import json
 import os
 from ..db import db
 from ..config import (
     DB_USER, DB_DSN, WALLET_DIR, WALLET_PASS, WORKSPACE_ID,
     APEX_SCHEMA, APEX_VERSION,
 )
+from ..utils import _json
 
 
 def apex_setup_guide() -> str:
@@ -204,7 +204,7 @@ GRANT UPDATE ON WWV_FLOW_STEP_ITEMS TO MY_SCHEMA;
             ),
         },
     }
-    return json.dumps(guide, ensure_ascii=False, indent=2)
+    return _json(guide)
 
 
 def apex_check_requirements() -> str:
@@ -302,13 +302,13 @@ def apex_check_requirements() -> str:
     passed = sum(1 for r in results if r["status"] == "PASS")
     failed = sum(1 for r in results if r["status"] == "FAIL")
 
-    return json.dumps({
+    return _json({
         "summary": f"{passed} passed, {failed} failed",
         "all_good": failed == 0,
         "checks": results,
         "next_step": "Call apex_connect() to connect to the database." if failed == 0
                      else "Fix the FAIL items above, then call apex_check_requirements() again.",
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 def apex_check_permissions() -> str:
@@ -325,7 +325,7 @@ def apex_check_permissions() -> str:
         - Active database connection (call apex_connect first)
     """
     if not db.is_connected():
-        return json.dumps({
+        return _json({
             "error": "Not connected. Call apex_connect() first.",
             "fix": "apex_connect()",
         })
@@ -358,12 +358,11 @@ def apex_check_permissions() -> str:
 
     def check_dml(table_name: str, operation: str = "UPDATE") -> bool:
         try:
-            # Check via USER_TAB_PRIVS or attempt a no-op
-            rows = db.execute(f"""
-                SELECT 1 FROM user_tab_privs
-                 WHERE table_name = '{table_name}'
-                   AND privilege = '{operation}'
-            """)
+            rows = db.execute(
+                "SELECT 1 FROM user_tab_privs "
+                "WHERE table_name = :tname AND privilege = :priv",
+                {"tname": table_name, "priv": operation},
+            )
             return len(rows) > 0
         except Exception:
             return False
@@ -384,11 +383,19 @@ def apex_check_permissions() -> str:
     # APEX packages
     for pkg in ["APEX_UTIL", "WWV_FLOW_IMP", "WWV_FLOW_IMP_SHARED",
                 "WWV_IMP_WORKSPACE", "WWV_FLOW_IMP_PAGE"]:
-        ok = check_select(f"ALL_OBJECTS WHERE OBJECT_NAME = '{pkg}'")
+        try:
+            exec_rows = db.execute(
+                "SELECT 1 FROM all_tab_privs "
+                "WHERE table_name = :tname AND privilege = 'EXECUTE' AND rownum = 1",
+                {"tname": pkg},
+            )
+            pkg_ok = len(exec_rows) > 0
+        except Exception:
+            pkg_ok = False
         permissions.append({
             "object": pkg,
             "privilege": "EXECUTE",
-            "granted": True,  # Can't easily check without calling - assume granted if connected
+            "granted": pkg_ok,
             "needed_for": "App creation tools (apex_create_app, apex_add_page, etc.)",
         })
 
@@ -409,7 +416,7 @@ def apex_check_permissions() -> str:
     granted_count = sum(1 for p in permissions if p.get("granted"))
     total = len(permissions)
 
-    return json.dumps({
+    return _json({
         "user": DB_USER,
         "dsn": DB_DSN,
         "permissions": permissions,
@@ -423,7 +430,7 @@ BEGIN
   APEX_UTIL.SET_WORKSPACE(P_WORKSPACE => 'YOUR_WORKSPACE');
 END;
 /""".format(user=DB_USER),
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 def apex_fix_permissions() -> str:
@@ -447,19 +454,19 @@ def apex_fix_permissions() -> str:
         - Active database connection (call apex_connect first)
     """
     if not db.is_connected():
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "Not connected. Call apex_connect() first.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     try:
         current_user_rows = db.execute("SELECT USER FROM DUAL")
         current_user = current_user_rows[0]["USER"] if current_user_rows else DB_USER
     except Exception as e:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"Could not determine current user: {e}",
-        }, ensure_ascii=False, indent=2)
+        })
 
     grant_statements = [
         f"GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO {current_user}",
@@ -496,9 +503,9 @@ def apex_fix_permissions() -> str:
             f"Ask your DBA to run the failed statements manually."
         )
 
-    return json.dumps({
+    return _json({
         "current_user": current_user,
         "grants": grants_result,
         "grant_script": grant_script,
         "summary": summary,
-    }, ensure_ascii=False, indent=2)
+    })

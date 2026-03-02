@@ -4,16 +4,10 @@ import json
 from typing import Any
 from ..db import db
 from ..ids import ids
-from ..session import session, PageInfo, RegionInfo
+from ..session import session, PageInfo, RegionInfo, ChartInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK, REGION_TMPL_CARDS
-from ..utils import _esc, _blk, _sql_to_varchar2
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _js_to_varchar2(js: str) -> str:
-    """Same as _sql_to_varchar2 but for JavaScript code."""
-    return _sql_to_varchar2(js)
+from ..utils import _json,  _esc, _blk, _sql_to_varchar2
+from ..validators import validate_chart_type
 
 
 # ── Tool 1: JET Chart ─────────────────────────────────────────────────────────
@@ -82,14 +76,19 @@ def apex_add_jet_chart(
         - Always ORDER BY the label column for consistent rendering
         - For multi-series: use "area" with stack=on for part-of-whole analysis
     """
+    try:
+        chart_type = validate_chart_type(chart_type)
+    except ValueError as e:
+        return _json({"status": "error", "error": str(e)})
+
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
+        return _json({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
     if not sql_query.strip():
-        return json.dumps({"status": "error", "error": "sql_query is required."})
+        return _json({"status": "error", "error": "sql_query is required."})
 
     chart_type_lower = chart_type.lower()
     effective_series_name = series_name or region_name
@@ -283,8 +282,12 @@ wwv_flow_imp_page.create_jet_chart_axis(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart"
         )
+        session.charts[region_id] = ChartInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, chart_type=apex_chart_type
+        )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "chart_id": chart_id,
@@ -292,10 +295,10 @@ wwv_flow_imp_page.create_jet_chart_axis(
             "series_count": 1 + len(extra),
             "page_id": page_id,
             "message": f"JET {apex_chart_type} chart '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 2: Dial Gauge Chart ──────────────────────────────────────────────────
@@ -339,13 +342,13 @@ def apex_add_gauge(
         JSON with status, region_id, chart_id.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
     if not sql_query.strip():
-        return json.dumps({"status": "error", "error": "sql_query is required."})
+        return _json({"status": "error", "error": "sql_query is required."})
 
     default_thresholds = thresholds or [
         {"value": max_value * 0.33, "color": "#e53935"},
@@ -431,18 +434,22 @@ wwv_flow_imp_page.create_jet_chart_axis(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="gauge"
         )
+        session.charts[region_id] = ChartInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, chart_type="dial"
+        )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "chart_id": chart_id,
             "chart_type": "dial",
             "page_id": page_id,
             "message": f"Gauge '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 3: Funnel Chart ──────────────────────────────────────────────────────
@@ -481,11 +488,11 @@ def apex_add_funnel(
         JSON with status, region_id, chart_id.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     effective_name = series_name or region_name
 
@@ -546,18 +553,22 @@ wwv_flow_imp_page.create_jet_chart_series(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="funnel"
         )
+        session.charts[region_id] = ChartInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, chart_type="funnel"
+        )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "chart_id": chart_id,
             "chart_type": "funnel",
             "page_id": page_id,
             "message": f"Funnel chart '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 4: Sparkline Metric Cards ────────────────────────────────────────────
@@ -595,11 +606,11 @@ def apex_add_sparkline(
         JSON with status, region_id.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     named_colors = {
         "blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
@@ -694,17 +705,21 @@ wwv_flow_imp_page.create_page_plug(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="sparkline"
         )
+        session.charts[region_id] = ChartInfo(
+            region_id=region_id, page_id=page_id,
+            region_name=region_name, chart_type="sparkline"
+        )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "metric_count": len(metrics),
             "page_id": page_id,
             "message": f"Sparkline cards '{region_name}' added to page {page_id} ({len(metrics)} metrics).",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 5: Metric Cards with inline HTML/JS ──────────────────────────────────
@@ -763,13 +778,13 @@ def apex_add_metric_cards(
         - Add link_page for drill-down navigation
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
+        return _json({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
     if not metrics:
-        return json.dumps({"status": "error", "error": "At least one metric is required."})
+        return _json({"status": "error", "error": "At least one metric is required."})
 
     auto_colors = ["blue", "green", "orange", "red", "purple", "teal", "indigo", "amber"]
 
@@ -962,17 +977,17 @@ wwv_flow_imp_page.create_page_plug(
             region_name=region_name, region_type="plsql"
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "metric_count": len(metrics),
             "style": style,
             "page_id": page_id,
             "message": f"Metric cards '{region_name}' added to page {page_id} ({len(metrics)} metrics, {style} style).",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 3: Analytics Page Generator ─────────────────────────────────────────
@@ -1031,9 +1046,9 @@ def apex_generate_analytics_page(
         - Put charts side by side by assigning alternating sequences (10, 20)
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     log: list[str] = []
     created_regions = 0
@@ -1045,7 +1060,7 @@ def apex_generate_analytics_page(
             from .page_tools import apex_add_page
             pr = json.loads(apex_add_page(page_id, page_name, "blank", auth_scheme=auth_scheme))
             if pr.get("status") == "error":
-                return json.dumps(pr)
+                return _json(pr)
             log.append(f"Created page {page_id} '{page_name}'")
         else:
             log.append(f"Page {page_id} already exists — adding content")
@@ -1061,7 +1076,7 @@ def apex_generate_analytics_page(
                 sequence=seq,
             ))
             if mr.get("status") == "error":
-                return json.dumps(mr)
+                return _json(mr)
             created_regions += 1
             seq += 10
             log.append(f"Added {len(metrics)} metric cards")
@@ -1091,7 +1106,7 @@ def apex_generate_analytics_page(
                 seq += 10
                 log.append(f"Added {ch.get('chart_type','bar')} chart '{ch.get('region_name')}'")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "page_name": page_name,
@@ -1099,10 +1114,10 @@ def apex_generate_analytics_page(
             "charts_created": chart_count,
             "log": log,
             "message": f"Analytics page {page_id} built: {len(metrics or [])} metrics, {chart_count} charts.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ── Tool 6: JET Calendar ──────────────────────────────────────────────────────
@@ -1147,22 +1162,22 @@ def apex_add_calendar(
         - Filter cancelled/inactive records in the WHERE clause
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
+        return _json({"status": "error", "error": f"Page {page_id} not found. Call apex_add_page() first."})
     if not sql_query.strip():
-        return json.dumps({"status": "error", "error": "sql_query is required."})
+        return _json({"status": "error", "error": "sql_query is required."})
     if not date_column.strip():
-        return json.dumps({"status": "error", "error": "date_column is required."})
+        return _json({"status": "error", "error": "date_column is required."})
     if not title_column.strip():
-        return json.dumps({"status": "error", "error": "title_column is required."})
+        return _json({"status": "error", "error": "title_column is required."})
 
     valid_views = {"month", "week", "day", "list"}
     view = display_as.lower().strip()
     if view not in valid_views:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"display_as '{display_as}' is not valid. Valid values: {sorted(valid_views)}",
         })
@@ -1201,7 +1216,7 @@ wwv_flow_imp_page.create_page_plug(
             region_type="calendar",
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "region_name": region_name,
@@ -1211,7 +1226,7 @@ wwv_flow_imp_page.create_page_plug(
             "title_column": title_column.upper(),
             "end_date_column": end_date_column.upper() if end_date_column else None,
             "message": f"Calendar '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

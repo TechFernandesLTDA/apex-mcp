@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 from ..db import db
 from ..session import session
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
+from ..validators import validate_table_name
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +58,13 @@ def apex_generate_rest_endpoints(
         - User must have EXECUTE on ORDS package (granted to schema users on ADB)
         - The table must exist and be owned by the current schema
     """
+    try:
+        validate_table_name(table_name)
+    except ValueError as e:
+        return _json({"status": "error", "error": str(e)})
+
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     table_upper = table_name.upper()
 
@@ -81,13 +87,13 @@ def apex_generate_rest_endpoints(
             """, {"tname": table_upper})
 
             if not pk_rows:
-                return json.dumps({
+                return _json({
                     "status": "error",
                     "error": (
                         f"No primary key constraint found on table '{table_upper}'. "
                         "Provide pk_column explicitly."
                     ),
-                }, ensure_ascii=False, indent=2)
+                })
 
             pk_column = pk_rows[0]["COLUMN_NAME"]
 
@@ -154,7 +160,7 @@ def apex_generate_rest_endpoints(
     p_source_type    => ORDS.source_type_plsql,
     p_mimes_allowed  => 'application/json',
     p_comments       => 'Create {_esc(table_upper)}',
-    p_source         => 'BEGIN INSERT INTO {_esc(table_upper)} VALUES (:body); :status := 201; END;'
+    p_source         => 'BEGIN INSERT INTO {_esc(table_upper)} ({_esc(",".join(non_pk_cols) if non_pk_cols else pk_col)}) VALUES ({_esc(",".join(":" + c.lower() for c in non_pk_cols) if non_pk_cols else ":" + pk_col_lower)}); :status := 201; END;'
   );
   -- Template for single item
   ORDS.DEFINE_TEMPLATE(
@@ -208,7 +214,7 @@ def apex_generate_rest_endpoints(
             {"method": "DELETE", "path": f"/{effective_base}/:{pk_col_lower}", "description": "Delete"},
         ]
 
-        return json.dumps({
+        return _json({
             "status":      "ok",
             "table_name":  table_upper,
             "module_name": module_name,
@@ -216,10 +222,10 @@ def apex_generate_rest_endpoints(
             "pk_column":   pk_col,
             "require_auth": require_auth,
             "endpoints":   endpoints,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +275,7 @@ def apex_export_page(
         use output_path to capture the full export.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Read the full CLOB via a direct cursor to handle large content correctly.
@@ -293,7 +299,7 @@ def apex_export_page(
             cur.close()
 
         if not row:
-            return json.dumps({
+            return _json({
                 "status":  "error",
                 "app_id":  app_id,
                 "page_id": page_id,
@@ -301,7 +307,7 @@ def apex_export_page(
                     f"No export data returned for page {page_id} of application {app_id}. "
                     "Verify the application and page exist and you have access."
                 ),
-            }, ensure_ascii=False, indent=2)
+            })
 
         file_name    = row[0] or f"f{app_id}_p{page_id:05d}.sql"
         raw_content  = row[1]
@@ -340,7 +346,7 @@ def apex_export_page(
                 "Provide output_path to save the complete SQL file."
             )
 
-        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+        return _json(result)
 
     except Exception as e:
         err_msg = str(e)
@@ -350,12 +356,12 @@ def apex_export_page(
                 " Hint: The current user may not have EXECUTE on the apex_export package. "
                 "Grant it with: GRANT EXECUTE ON apex_export TO <schema>;"
             )
-        return json.dumps({
+        return _json({
             "status":  "error",
             "app_id":  app_id,
             "page_id": page_id,
             "error":   err_msg + hint,
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +396,14 @@ def apex_generate_docs(app_id: int | None = None) -> str:
         keep output manageable.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     effective_app_id = app_id if app_id is not None else session.app_id
     if effective_app_id is None:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "No app_id provided and no active import session. Pass app_id explicitly.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     try:
         # --- App metadata ---
@@ -415,10 +421,10 @@ def apex_generate_docs(app_id: int | None = None) -> str:
         """, {"app_id": effective_app_id})
 
         if not app_rows:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Application {effective_app_id} not found.",
-            }, ensure_ascii=False, indent=2)
+            })
 
         app = app_rows[0]
         app_name    = app.get("APPLICATION_NAME") or f"App {effective_app_id}"
@@ -579,7 +585,7 @@ def apex_generate_docs(app_id: int | None = None) -> str:
 
         markdown = "\n".join(lines)
 
-        return json.dumps({
+        return _json({
             "status":   "ok",
             "app_id":   effective_app_id,
             "markdown": markdown,
@@ -590,10 +596,10 @@ def apex_generate_docs(app_id: int | None = None) -> str:
                 "lovs":         len(lovs),
                 "auth_schemes": len(auth_schemes),
             },
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -617,13 +623,13 @@ def apex_begin_batch() -> str:
         JSON confirmation that batch mode is active.
     """
     db.begin_batch()
-    return json.dumps({
+    return _json({
         "status":  "ok",
         "message": (
             "Batch mode started. Operations will be queued until apex_commit_batch(). "
             "Call apex_commit_batch() to execute all queued operations in one round-trip."
         ),
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 def apex_commit_batch() -> str:
@@ -645,10 +651,10 @@ def apex_commit_batch() -> str:
     log = db.commit_batch()
     ok_count  = sum(1 for entry in log if entry.startswith("OK"))
     err_count = sum(1 for entry in log if entry.startswith("ERR"))
-    return json.dumps({
+    return _json({
         "status":   "ok" if err_count == 0 else "partial",
         "executed": len(log),
         "ok":       ok_count,
         "errors":   err_count,
         "log":      log,
-    }, ensure_ascii=False, indent=2)
+    })

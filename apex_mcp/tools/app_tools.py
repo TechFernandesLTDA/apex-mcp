@@ -5,12 +5,17 @@ from ..db import db
 from ..ids import ids
 from ..session import session
 from ..templates import (
-    PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN,
+    PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN, PAGE_TMPL_DIALOG,
     THEME_STYLE_ID, CHECKSUM_SALT,
     LIST_TMPL_SIDE_NAV, LIST_TMPL_NAVBAR,
+    BTN_TMPL_TEXT,
+    REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BUTTONS,
+    REPORT_TMPL_VALUE_ATTR,
+    LABEL_OPTIONAL, LABEL_REQUIRED,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA, APEX_VERSION_DATE, APEX_COMPAT_MODE
-from ..utils import _blk
+from ..utils import _json,  _blk
+from ..validators import validate_app_id
 
 
 def apex_list_apps() -> str:
@@ -28,7 +33,7 @@ def apex_list_apps() -> str:
         - User must have SELECT on APEX_APPLICATIONS view (granted to APEX schema users)
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     rows = db.execute("""
         SELECT application_id,
@@ -53,7 +58,7 @@ def apex_list_apps() -> str:
              ORDER BY application_id
         """)
 
-    return json.dumps({"status": "ok", "data": rows, "count": len(rows)}, default=str, ensure_ascii=False, indent=2)
+    return _json({"status": "ok", "data": rows, "count": len(rows)})
 
 
 def apex_create_app(
@@ -117,8 +122,13 @@ def apex_create_app(
         - User must have CREATE SESSION, ALTER SESSION
         - For ADB: user must be the APEX workspace schema or have equivalent grants
     """
+    try:
+        validate_app_id(app_id)
+    except ValueError as e:
+        return _json({"status": "error", "error": str(e)})
+
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     alias = app_alias or app_name.upper().replace(" ", "-")
     log: list[str] = []
@@ -233,22 +243,22 @@ wwv_flow_imp_shared.create_theme(
 ,p_is_locked=>false
 ,p_current_theme_style_id=>{effective_theme_style}
 ,p_default_page_template=>{PAGE_TMPL_STANDARD}
-,p_default_dialog_template=>2100407606326202693
+,p_default_dialog_template=>{PAGE_TMPL_DIALOG}
 ,p_error_template=>{PAGE_TMPL_LOGIN}
 ,p_printer_friendly_template=>{PAGE_TMPL_STANDARD}
 ,p_login_template=>{PAGE_TMPL_LOGIN}
-,p_default_button_template=>4072362960822175091
-,p_default_region_template=>4072358936313175081
-,p_default_chart_template=>4072358936313175081
-,p_default_form_template=>4072358936313175081
-,p_default_reportr_template=>4072358936313175081
-,p_default_tabform_template=>4072358936313175081
-,p_default_wizard_template=>4072358936313175081
+,p_default_button_template=>{BTN_TMPL_TEXT}
+,p_default_region_template=>{REGION_TMPL_STANDARD}
+,p_default_chart_template=>{REGION_TMPL_STANDARD}
+,p_default_form_template=>{REGION_TMPL_STANDARD}
+,p_default_reportr_template=>{REGION_TMPL_STANDARD}
+,p_default_tabform_template=>{REGION_TMPL_STANDARD}
+,p_default_wizard_template=>{REGION_TMPL_STANDARD}
 ,p_default_menur_template=>2531463326621247859
-,p_default_listr_template=>4072358936313175081
-,p_default_irr_template=>2100526641005906379
-,p_default_report_template=>2538654340625403440
-,p_default_label_template=>1609121967514267634
+,p_default_listr_template=>{REGION_TMPL_STANDARD}
+,p_default_irr_template=>{REGION_TMPL_IR}
+,p_default_report_template=>{REPORT_TMPL_VALUE_ATTR}
+,p_default_label_template=>{LABEL_OPTIONAL}
 ,p_default_menu_template=>4072363345357175094
 ,p_default_calendar_template=>4072363550766175095
 ,p_default_list_template=>4072361143931175087
@@ -256,10 +266,10 @@ wwv_flow_imp_shared.create_theme(
 ,p_default_top_nav_list_temp=>2526754704087354841
 ,p_default_side_nav_list_temp=>{LIST_TMPL_SIDE_NAV}
 ,p_default_nav_list_position=>'SIDE'
-,p_default_dialogbtnr_template=>2126429139436695430
+,p_default_dialogbtnr_template=>{REGION_TMPL_BUTTONS}
 ,p_default_dialogr_template=>4501440665235496320
-,p_default_option_label=>1609121967514267634
-,p_default_required_label=>1609122147107268652
+,p_default_option_label=>{LABEL_OPTIONAL}
+,p_default_required_label=>{LABEL_REQUIRED}
 ,p_default_navbar_list_template=>{LIST_TMPL_NAVBAR}
 ,p_file_prefix => nvl(wwv_flow_application_install.get_static_theme_file_prefix(42),'#APEX_FILES#themes/theme_42/{APEX_COMPAT_MODE}/')
 ,p_files_version=>64
@@ -372,7 +382,7 @@ wwv_flow_imp_shared.create_user_interface(
                 f"otherwise the app will redirect to a non-existent page and return HTTP 404."
             )
 
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
         # Cleanup: try to end any partial import session
@@ -382,7 +392,7 @@ wwv_flow_imp_shared.create_user_interface(
             pass
         session.reset()
         ids.reset()
-        return json.dumps({"status": "error", "error": str(e), "log": log, "cleanup": "session reset"}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log, "cleanup": "session reset"})
 
 
 def apex_finalize_app() -> str:
@@ -395,11 +405,11 @@ def apex_finalize_app() -> str:
         JSON with status and the APEX URL to access the application.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if session.import_ended:
-        return json.dumps({"status": "error", "error": "Import already finalized. Call apex_create_app() to start a new session."})
+        return _json({"status": "error", "error": "Import already finalized. Call apex_create_app() to start a new session."})
 
     try:
         db.plsql("begin wwv_flow_imp.import_end(p_auto_install_sup_obj=>nvl(wwv_flow_application_install.get_auto_install_sup_obj,false)); end;")
@@ -407,15 +417,15 @@ def apex_finalize_app() -> str:
         session.import_ended = True
 
         app_url = f"f?p={session.app_id}"
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": session.app_id,
             "message": f"Application {session.app_name} (ID {session.app_id}) finalized successfully.",
             "apex_url": app_url,
             "summary": session.summary(),
-        }, ensure_ascii=False, indent=2)
+        })
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_delete_app(app_id: int) -> str:
@@ -435,7 +445,7 @@ def apex_delete_app(app_id: int) -> str:
         - User must own the application or have APEX admin privileges
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         db.plsql(_blk(f"""
@@ -458,12 +468,12 @@ def apex_delete_app(app_id: int) -> str:
         if session.app_id == app_id:
             session.reset()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "message": f"Application {app_id} deleted successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_export_app(app_id: int, output_path: str = "") -> str:
@@ -507,7 +517,7 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
         # Returns only the first 500 chars as preview (no file saved).
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Read the full CLOB via a direct cursor (avoids DBMS_LOB.SUBSTR 4000-char limit)
@@ -528,12 +538,12 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
             cur.close()
 
         if not row:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "app_id": app_id,
                 "error": f"No export data returned for application {app_id}. "
                          "Verify the application exists and you have access.",
-            }, ensure_ascii=False, indent=2)
+            })
 
         file_name = row[0] or f"f{app_id}.sql"
         raw_content = row[1]
@@ -562,14 +572,14 @@ def apex_export_app(app_id: int, output_path: str = "") -> str:
                 f"Provide output_path to save the complete file."
             )
 
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({
+        return _json({
             "status": "error",
             "app_id": app_id,
             "error": str(e),
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 def apex_describe_page(app_id: int, page_id: int) -> str:
@@ -594,7 +604,7 @@ def apex_describe_page(app_id: int, page_id: int) -> str:
             - summary: Counts of each component type
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Page metadata
@@ -606,7 +616,7 @@ def apex_describe_page(app_id: int, page_id: int) -> str:
         """, {"app_id": app_id, "page_id": page_id})
 
         if not page_rows:
-            return json.dumps({"status": "error", "error": f"Page {page_id} not found in app {app_id}."})
+            return _json({"status": "error", "error": f"Page {page_id} not found in app {app_id}."})
 
         page = page_rows[0]
 
@@ -621,11 +631,16 @@ def apex_describe_page(app_id: int, page_id: int) -> str:
 
         # Items
         items = db.execute("""
-            SELECT item_name, item_type, display_sequence, region_id,
-                   label, lov_definition, item_default, is_required
+            SELECT item_name,
+                   display_as        AS item_type,
+                   item_sequence     AS display_sequence,
+                   region_id,
+                   label,
+                   lov_definition,
+                   item_default
               FROM apex_application_page_items
              WHERE application_id = :app_id AND page_id = :page_id
-             ORDER BY display_sequence
+             ORDER BY item_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
         # Buttons
@@ -660,7 +675,7 @@ def apex_describe_page(app_id: int, page_id: int) -> str:
             src = r.get("REGION_SOURCE") or ""
             r["REGION_SOURCE"] = (src[:200] + "...") if len(str(src)) > 200 else src
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page": {k.lower(): v for k, v in page.items()},
@@ -676,10 +691,10 @@ def apex_describe_page(app_id: int, page_id: int) -> str:
                 "processes": len(processes),
                 "dynamic_actions": len(das),
             },
-        }, ensure_ascii=False, indent=2, default=str)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_dry_run_preview(enabled: bool = True) -> str:
@@ -704,18 +719,18 @@ def apex_dry_run_preview(enabled: bool = True) -> str:
     """
     if enabled:
         db.enable_dry_run()
-        return json.dumps({
+        return _json({
             "status": "ok",
             "mode": "dry_run_enabled",
             "message": "Dry-run mode ON. All subsequent plsql() calls will be logged but NOT executed. Call apex_dry_run_preview(False) to stop and retrieve the log.",
-        }, ensure_ascii=False, indent=2)
+        })
     else:
         log = db.get_dry_run_log()
         db.disable_dry_run()
-        return json.dumps({
+        return _json({
             "status": "ok",
             "mode": "dry_run_disabled",
             "statements_count": len(log),
             "plsql_log": log,
             "message": f"Dry-run mode OFF. {len(log)} PL/SQL statement(s) were captured (not executed).",
-        }, ensure_ascii=False, indent=2)
+        })

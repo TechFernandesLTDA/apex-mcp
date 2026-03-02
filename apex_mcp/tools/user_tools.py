@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from ..db import db
 from ..config import WORKSPACE_ID
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
 
 
 def apex_create_user(
@@ -40,14 +40,14 @@ def apex_create_user(
         - User must have EXECUTE on apex_util package
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     effective_ws_id = workspace_id if workspace_id is not None else WORKSPACE_ID
 
     if not username or not username.strip():
-        return json.dumps({"status": "error", "error": "username is required."})
+        return _json({"status": "error", "error": "username is required."})
     if not password or len(password) < 6:
-        return json.dumps({"status": "error", "error": "password must be at least 6 characters."})
+        return _json({"status": "error", "error": "password must be at least 6 characters."})
 
     try:
         # Set workspace context before calling apex_util
@@ -75,7 +75,7 @@ apex_util.create_user(
  ,p_account_expiry           => NULL
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "message": f"User '{username}' created successfully.",
             "username": username,
@@ -87,18 +87,18 @@ apex_util.create_user(
                 "This is an APEX Accounts workspace user. "
                 "Use apex_list_users() to verify the account was created."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
         err = str(e)
         # Provide a friendlier message for common errors
         if "ORA-20987" in err or "already exists" in err.lower():
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"User '{username}' already exists in this workspace.",
                 "detail": err,
-            }, ensure_ascii=False, indent=2)
-        return json.dumps({"status": "error", "error": err}, ensure_ascii=False, indent=2)
+            })
+        return _json({"status": "error", "error": err})
 
 
 def apex_list_users(workspace_id: int | None = None) -> str:
@@ -113,7 +113,7 @@ def apex_list_users(workspace_id: int | None = None) -> str:
     Queries APEX_WORKSPACE_APEX_USERS view.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     effective_ws_id = workspace_id if workspace_id is not None else WORKSPACE_ID
 
@@ -142,12 +142,12 @@ def apex_list_users(workspace_id: int | None = None) -> str:
                  ORDER BY user_name
             """)
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "workspace_id": effective_ws_id,
             "count": len(rows),
             "users": rows,
-        }, default=str, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

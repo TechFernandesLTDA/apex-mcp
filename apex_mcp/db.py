@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import threading
+import time
 from typing import Optional
 import oracledb
 from .config import DB_USER, DB_PASS, DB_DSN, WALLET_DIR, WALLET_PASS, WORKSPACE_ID, APEX_SCHEMA
@@ -31,7 +32,7 @@ class ConnectionManager:
 
     def __init__(self):
         self._conn: Optional[oracledb.Connection] = None
-        self._conn_lock = threading.Lock()
+        self._conn_lock = threading.RLock()
         self.dry_run: bool = False
         self._dry_run_log: list[str] = []
         self.batch_mode: bool = False
@@ -110,7 +111,7 @@ class ConnectionManager:
                     _log.warning("Transient error on attempt %d, reconnecting: %s", attempt + 1, exc)
                     with self._conn_lock:
                         self._conn = None  # force reconnect on next .conn access
-                    import time; time.sleep(1)
+                    time.sleep(1)
                     continue
                 raise
         raise last_exc  # shouldn't reach here
@@ -169,7 +170,7 @@ class ConnectionManager:
                     _log.warning("Transient error on plsql attempt %d, reconnecting: %s", attempt + 1, exc)
                     with self._conn_lock:
                         self._conn = None
-                    import time; time.sleep(1)
+                    time.sleep(1)
                     continue
                 raise
 

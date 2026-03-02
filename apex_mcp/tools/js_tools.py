@@ -6,7 +6,7 @@ from ..ids import ids
 from ..session import session
 from ..config import WORKSPACE_ID
 from ..templates import REGION_TMPL_BLANK, PROC_PLSQL
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
 
 
 def _camel(name: str) -> str:
@@ -66,12 +66,12 @@ def apex_add_page_js(
         apex.message.showErrors([{message:'Error'}]) -- Show errors
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     if page_id not in session.pages:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": (
                 f"Page {page_id} not found in current session. "
@@ -127,7 +127,7 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "region_id": region_id,
@@ -137,10 +137,10 @@ wwv_flow_imp_page.create_page_plug(
                 f"The script tag will render at the bottom of the page body."
             ),
             "has_file_urls": bool(js_file_urls.strip()),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_global_js(
@@ -176,9 +176,9 @@ def apex_add_global_js(
         For page-specific JS, use apex_add_page_js() instead.
     """
     if not function_name or not function_name.strip():
-        return json.dumps({"status": "error", "error": "function_name is required."})
+        return _json({"status": "error", "error": "function_name is required."})
     if not javascript_code or not javascript_code.strip():
-        return json.dumps({"status": "error", "error": "javascript_code is required."})
+        return _json({"status": "error", "error": "javascript_code is required."})
 
     # Decide whether to wrap in an IIFE
     stripped = javascript_code.strip()
@@ -214,7 +214,7 @@ def apex_add_global_js(
         "  This is slightly less efficient but avoids file upload.",
     ]
 
-    return json.dumps({
+    return _json({
         "status": "ok",
         "function_name": function_name,
         "filename": filename,
@@ -227,7 +227,7 @@ def apex_add_global_js(
             "Use apex_add_page_js(page_id=0, ...) for a quick alternative that injects "
             "JS on the Global Page (page 0) without requiring file upload."
         ),
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 def apex_generate_ajax_handler(
@@ -303,12 +303,12 @@ def apex_generate_ajax_handler(
         - Call apex_application.g_unrecoverable_error := TRUE; for fatal errors
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     if page_id not in session.pages:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": (
                 f"Page {page_id} not found in current session. "
@@ -317,9 +317,9 @@ def apex_generate_ajax_handler(
         })
 
     if not callback_name or not callback_name.strip():
-        return json.dumps({"status": "error", "error": "callback_name is required."})
+        return _json({"status": "error", "error": "callback_name is required."})
     if not plsql_code or not plsql_code.strip():
-        return json.dumps({"status": "error", "error": "plsql_code is required."})
+        return _json({"status": "error", "error": "plsql_code is required."})
 
     upper_callback = callback_name.strip().upper()
     items = input_items or []
@@ -448,7 +448,7 @@ wwv_flow_imp_page.create_page_process(
                 f"to add the generated function to the page so it is available at runtime."
             )
 
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

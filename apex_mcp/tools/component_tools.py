@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from ..db import db
 from ..ids import ids
-from ..session import session, RegionInfo, ItemInfo
+from ..session import session, RegionInfo, ItemInfo, ProcessInfo, DynamicActionInfo
 from ..templates import (
     REGION_TMPL_STANDARD,
     REGION_TMPL_IR,
@@ -34,7 +34,7 @@ from ..templates import (
     PROC_DML,
     PROC_PLSQL,
 )
-from ..utils import _esc, _blk, _sql_to_varchar2
+from ..utils import _json,  _esc, _blk, _sql_to_varchar2
 
 
 def _find_region_id(page_id: int, region_name: str) -> int | None:
@@ -89,9 +89,9 @@ def apex_add_region(
         - Use sequence increments of 10 to allow future insertions
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         region_type_lower = region_type.lower()
@@ -170,7 +170,7 @@ wwv_flow_imp_page.create_worksheet(
             region_type=region_type_lower,
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "region_id": region_id,
             "page_id": page_id,
@@ -178,10 +178,10 @@ wwv_flow_imp_page.create_worksheet(
             "region_type": region_type_lower,
             "sequence": sequence,
             "message": f"Region '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_item(
@@ -209,7 +209,7 @@ def apex_add_item(
         item_type: Input type:
             - "text": Text input (default)
             - "number": Numeric input with validation
-            - "date": Date picker (JET)
+            - "date": Date picker (APEX native)
             - "select": Select list (requires lov_name)
             - "hidden": Hidden field (no label shown)
             - "textarea": Multi-line text
@@ -235,9 +235,9 @@ def apex_add_item(
         - Use source_column to auto-populate from DB when page loads
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     # Ensure correct item name prefix
     item_name = _ensure_item_prefix(item_name, page_id)
@@ -245,7 +245,7 @@ def apex_add_item(
     # Find the parent region
     region_id = _find_region_id(page_id, region_name)
     if region_id is None:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"Region '{region_name}' not found on page {page_id}. Create it first with apex_add_region().",
         })
@@ -327,7 +327,7 @@ wwv_flow_imp_page.create_page_item(
             item_type=item_type_lower,
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "item_id": item_id,
             "item_name": item_name,
@@ -337,10 +337,10 @@ wwv_flow_imp_page.create_page_item(
             "label": label,
             "sequence": sequence,
             "message": f"Item '{item_name}' added to region '{region_name}' on page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_button(
@@ -389,13 +389,13 @@ def apex_add_button(
         - Use consistent button ordering: Save (seq 10), Cancel (seq 20), Delete (seq 30)
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     region_id = _find_region_id(page_id, region_name)
     if region_id is None:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"Region '{region_name}' not found on page {page_id}. Create it first with apex_add_region().",
         })
@@ -452,7 +452,7 @@ wwv_flow_imp_page.create_page_button(
         # Track button ID for condition lookup in processes
         session.buttons[f"{page_id}:{button_name.upper()}"] = button_id
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "button_id": button_id,
             "button_name": button_name.upper(),
@@ -462,10 +462,10 @@ wwv_flow_imp_page.create_page_button(
             "region_name": region_name,
             "hot": hot,
             "message": f"Button '{button_name}' added to region '{region_name}' on page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_process(
@@ -515,9 +515,9 @@ def apex_add_process(
         - Set condition_button to avoid running process on wrong button clicks
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         process_type_lower = process_type.lower()
@@ -583,8 +583,15 @@ wwv_flow_imp_page.create_page_process(
 
         # Track in session
         session.app_processes.append(process_name)
+        session.processes[process_id] = ProcessInfo(
+            process_id=process_id,
+            page_id=page_id,
+            process_name=process_name,
+            process_type=apex_proc_type,
+            exec_point=exec_point,
+        )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "process_id": process_id,
             "process_name": process_name,
@@ -593,10 +600,10 @@ wwv_flow_imp_page.create_page_process(
             "page_id": page_id,
             "condition_button": condition_button or None,
             "message": f"Process '{process_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_dynamic_action(
@@ -660,9 +667,9 @@ def apex_add_dynamic_action(
           Example: show P10_DETAIL when P10_TYPE = 'DETAIL', hide it otherwise.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         event_lower = event.lower()
@@ -807,7 +814,15 @@ wwv_flow_imp_page.create_page_da_action(
 {false_affected_lines}
 );"""))
 
-        return json.dumps({
+        # Track in session
+        session.dynamic_actions[da_id] = DynamicActionInfo(
+            da_id=da_id,
+            page_id=page_id,
+            da_name=da_name,
+            event=apex_event,
+        )
+
+        return _json({
             "status": "ok",
             "da_id": da_id,
             "da_name": da_name,
@@ -820,7 +835,7 @@ wwv_flow_imp_page.create_page_da_action(
             "has_false_branch": bool(false_action_type),
             "warnings": js_warnings,
             "message": f"Dynamic Action '{da_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

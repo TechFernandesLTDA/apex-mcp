@@ -12,7 +12,7 @@ from ..templates import (
     PROC_PLSQL,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA
-from ..utils import _esc, _blk, _sql_to_varchar2
+from ..utils import _json,  _esc, _blk, _sql_to_varchar2
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +57,9 @@ def apex_generate_report_page(
         JSON with status, page_id, items_created.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
 
     ir_title = title or page_name
     log: list[str] = []
@@ -183,15 +183,15 @@ wwv_flow_imp_page.create_worksheet(
 );"""))
         log.append("IR region + worksheet created")
 
-        return json.dumps({
+        return _json({
             "status": "ok", "page_id": page_id, "page_name": page_name,
             "ir_region_id": ir_region_id, "items_created": items_created,
             "message": f"Report page {page_id} '{page_name}' created with {len(filter_items or [])} filter(s).",
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +228,11 @@ def apex_generate_wizard(
         JSON with status, pages created, items created.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if not steps:
-        return json.dumps({"status": "error", "error": "At least one step is required."})
+        return _json({"status": "error", "error": "At least one step is required."})
 
     log: list[str] = []
     all_items: list[str] = []
@@ -435,7 +435,7 @@ wwv_flow_imp_page.create_page_branch(
 
             log.append(f"Step {step_idx+1}: page {page_id} '{step_title}' created ({len(step_items)} items)")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "wizard_title": wizard_title,
             "steps": total_steps,
@@ -443,10 +443,10 @@ wwv_flow_imp_page.create_page_branch(
             "items_created": all_items,
             "message": f"Wizard '{wizard_title}' created with {total_steps} steps.",
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})
 
 
 # ---------------------------------------------------------------------------
@@ -490,11 +490,11 @@ def apex_add_notification_region(
         JSON with status, region_id.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     type_styles = {
         "info":    ("#1e88e5", "#e3f2fd", "#bbdefb", "fa-info-circle"),
@@ -555,14 +555,14 @@ wwv_flow_imp_page.create_page_plug(
             region_name=region_name, region_type="notification"
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok", "region_id": region_id, "notification_type": notification_type,
             "page_id": page_id,
             "message": f"Notification region '{region_name}' ({notification_type}) added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -573,9 +573,9 @@ def apex_add_page_css(
     page_id: int,
     css_code: str,
 ) -> str:
-    """Add inline CSS to a page (equivalent to Page > CSS > Inline in App Builder).
+    """Add inline CSS to a page via a PL/SQL region that outputs a <style> block.
 
-    The CSS is injected into the page's <head> via the p_inline_css parameter.
+    The CSS is injected into the page body via a hidden PL/SQL region using htp.p().
     Use for page-specific styling that shouldn't affect the whole application.
     For global CSS affecting all pages, upload a static file instead.
 
@@ -593,11 +593,11 @@ def apex_add_page_css(
         page, only the last call takes effect. Concatenate your CSS before calling.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     try:
         db.plsql(_blk(f"""
@@ -613,13 +613,13 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok", "page_id": page_id,
             "message": f"CSS injected into page {page_id} ({len(css_code)} chars).",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -652,9 +652,9 @@ def apex_add_global_css(css_code: str) -> str:
         - The CSS renders inside a <style> tag at BODY position on every page.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     page0_created = False
     try:
@@ -689,7 +689,7 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_query_options=>'DERIVED_REPORT_COLUMNS'
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_0_created": page0_created,
             "region_id": region_id,
@@ -697,10 +697,10 @@ wwv_flow_imp_page.create_page_plug(
                 f"Global CSS injected via Page 0 ({len(css_code)} chars). "
                 "CSS will apply to every page automatically."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -736,11 +736,11 @@ def apex_add_interactive_grid(
         JSON with status, region_id.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     upper_table = table_name.upper()
     ig_sql = sql_query or f"SELECT * FROM {upper_table}"
@@ -799,14 +799,14 @@ wwv_flow_imp_page.create_interactive_grid(
             region_name=region_name, region_type="NATIVE_IG"
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok", "region_id": region_id, "ig_id": ig_id,
             "table": upper_table, "editable": editable, "page_id": page_id,
             "message": f"Interactive Grid '{region_name}' added to page {page_id} (editable={editable}).",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -844,11 +844,11 @@ def apex_bulk_add_items(
         JSON with status, items_created list.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     # Find region
     region_id = None
@@ -857,7 +857,7 @@ def apex_bulk_add_items(
             region_id = reg.region_id
             break
     if region_id is None:
-        return json.dumps({"status": "error", "error": f"Region '{region_name}' not found on page {page_id}."})
+        return _json({"status": "error", "error": f"Region '{region_name}' not found on page {page_id}."})
 
     type_map = {
         "text": ITEM_TEXT, "number": ITEM_NUMBER, "date": ITEM_DATE,
@@ -918,13 +918,13 @@ wwv_flow_imp_page.create_page_item(
         except Exception as e:
             errors.append(f"{item_name}: {e}")
 
-    return json.dumps({
+    return _json({
         "status": "ok" if not errors else "partial",
         "items_created": items_created,
         "errors": errors,
         "count": len(items_created),
         "message": f"{len(items_created)} items added to region '{region_name}' on page {page_id}.",
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -944,11 +944,11 @@ def apex_validate_app(app_id: int | None = None) -> str:
         JSON with validation results: errors, warnings, info messages, and a score.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     effective_app_id = app_id or (session.app_id if session.app_id else None)
     if not effective_app_id:
-        return json.dumps({"status": "error", "error": "No app_id provided and no active session."})
+        return _json({"status": "error", "error": "No app_id provided and no active session."})
 
     try:
         issues:   list[str] = []
@@ -1060,7 +1060,7 @@ def apex_validate_app(app_id: int | None = None) -> str:
 
         score = max(0, min(100, 100 - len(issues) * 10 - len(warnings) * 2))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": effective_app_id,
             "score": score,
@@ -1077,10 +1077,10 @@ def apex_validate_app(app_id: int | None = None) -> str:
                 f"Validation complete: {len(issues)} errors, "
                 f"{len(warnings)} warnings. Score: {score}/100."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -1110,14 +1110,14 @@ def apex_preview_page(
     effective_page_id = page_id
 
     if not effective_app_id:
-        return json.dumps({"status": "error", "error": "No app_id available. Provide app_id or call apex_create_app() first."})
+        return _json({"status": "error", "error": "No app_id available. Provide app_id or call apex_create_app() first."})
 
     if not effective_page_id:
         # Use last page in session
         if session.pages:
             effective_page_id = max(session.pages.keys())
         else:
-            return json.dumps({"status": "error", "error": "No page_id provided and no pages in session."})
+            return _json({"status": "error", "error": "No page_id provided and no pages in session."})
 
     page_info = None
     if effective_page_id in session.pages:
@@ -1126,7 +1126,7 @@ def apex_preview_page(
 
     apex_url = f"f?p={effective_app_id}:{effective_page_id}"
 
-    return json.dumps({
+    return _json({
         "status": "ok",
         "app_id": effective_app_id,
         "page_id": effective_page_id,
@@ -1138,7 +1138,7 @@ def apex_preview_page(
             f"Or use the relative URL: {apex_url}"
         ),
         "message": f"Preview URL for App {effective_app_id}, Page {effective_page_id}: {apex_url}",
-    }, ensure_ascii=False, indent=2)
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -1172,11 +1172,11 @@ def apex_add_search_bar(
         JSON with status, item created, dynamic action created.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found."})
+        return _json({"status": "error", "error": f"Page {page_id} not found."})
 
     full_item_name = f"P{page_id}_{search_item_name.upper()}"
 
@@ -1249,17 +1249,17 @@ wwv_flow_imp_page.create_page_da_action(
 ,p_attribute_01=>'{_esc(da_js)}'
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "search_region_id": search_region_id,
             "search_item": full_item_name,
             "target_region": target_region_name,
             "page_id": page_id,
             "message": f"Search bar '{full_item_name}' added — filters '{target_region_name}' on keyup.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -1294,11 +1294,11 @@ def apex_generate_from_schema(
         JSON with status, all pages created, all items created.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active."})
+        return _json({"status": "error", "error": "No import session active."})
     if not tables:
-        return json.dumps({"status": "error", "error": "At least one table is required."})
+        return _json({"status": "error", "error": "At least one table is required."})
 
     from .generator_tools import apex_generate_crud
     from .shared_tools import apex_add_nav_item
@@ -1439,7 +1439,7 @@ def apex_generate_from_schema(
             else:
                 log.append(f"CRUD for {table}: ERROR — {r.get('error')}")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "tables": tables,
             "pages_created": all_pages,
@@ -1448,10 +1448,10 @@ def apex_generate_from_schema(
             "fk_summary": fk_summary,
             "message": f"Generated app from {len(tables)} tables: {len(all_pages)} pages, {total_items} items.",
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})
 
 
 # ---------------------------------------------------------------------------
@@ -1492,11 +1492,11 @@ def apex_generate_modal_form(
         JSON with status, region_id, static_id, pk_item, and created list.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
 
     modal_title = title or region_name
     # Derive a safe static_id from region_name (lowercase, underscores, no spaces)
@@ -1609,7 +1609,7 @@ wwv_flow_imp_page.create_page_process(
         session.app_processes.append(f"Save Modal {region_name}")
         created.append(f"process:Save Modal {region_name}")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "region_id": region_id,
@@ -1623,10 +1623,10 @@ wwv_flow_imp_page.create_page_process(
                 f"Modal form '{region_name}' created on page {page_id}. "
                 f"Open it with: apex.region('{static_id}').show();"
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -1669,11 +1669,11 @@ def apex_add_master_detail(
         JSON with status, region IDs, hidden item name, and DA ID.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
 
     full_item_name = (
         f"P{page_id}_{page_item_name.upper()}"
@@ -1822,7 +1822,7 @@ wwv_flow_imp_page.create_page_da_action(
 );"""))
         created.append(f"da:Master Row Click - {master_region_name}")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "master_region_id": master_region_id,
@@ -1838,10 +1838,10 @@ wwv_flow_imp_page.create_page_da_action(
                 f"'{master_region_name}' -> '{detail_region_name}' "
                 f"linked via {link_column.upper()} -> {full_item_name}."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -1891,11 +1891,11 @@ def apex_add_timeline(
         JSON with status, region_id, and message.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
 
     # Escape column names for use in PL/SQL
     dc = date_col.upper()
@@ -1965,7 +1965,7 @@ wwv_flow_imp_page.create_page_plug(
             region_type="timeline",
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "region_id": region_id,
@@ -1977,10 +1977,10 @@ wwv_flow_imp_page.create_page_plug(
                 "icon": ic or "(default fa-circle)",
             },
             "message": f"Timeline region '{region_name}' added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -2021,13 +2021,13 @@ def apex_add_breadcrumb(
         JSON with status, region_id, and the number of entries rendered.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
     if not entries:
-        return json.dumps({"status": "error", "error": "At least one breadcrumb entry is required."})
+        return _json({"status": "error", "error": "At least one breadcrumb entry is required."})
 
     # Build the list items HTML string
     li_parts: list[str] = []
@@ -2081,17 +2081,17 @@ wwv_flow_imp_page.create_page_plug(
             region_type="breadcrumb",
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "region_id": region_id,
             "region_name": region_name,
             "entries_count": len(entries),
             "message": f"Breadcrumb region '{region_name}' with {len(entries)} entries added to page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -2150,13 +2150,13 @@ def apex_add_faceted_search(
         JSON with status, region IDs, filter items created, and DA IDs.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
     if not facets:
-        return json.dumps({"status": "error", "error": "At least one facet is required."})
+        return _json({"status": "error", "error": "At least one facet is required."})
 
     created: list[str] = []
 
@@ -2281,7 +2281,7 @@ wwv_flow_imp_page.create_page_da_action(
             da_ids.append(da_id)
             created.append(f"da:Facet Filter {label}")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "filter_region_id": filter_region_id,
@@ -2293,10 +2293,10 @@ wwv_flow_imp_page.create_page_da_action(
                 f"Faceted search created on page {page_id}: "
                 f"{len(filter_items_created)} filter(s) -> '{region_name}' IR."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -2338,11 +2338,11 @@ def apex_add_chart_drilldown(
         JSON with status, da_id, item_name, and instructions.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
 
     # Resolve chart region ID
     chart_region_id: int | None = None
@@ -2453,7 +2453,7 @@ wwv_flow_imp_page.create_page_da_action(
 {refresh_attr}
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "da_id": da_id,
@@ -2472,10 +2472,10 @@ wwv_flow_imp_page.create_page_da_action(
                 f"click on '{chart_region_name}' sets '{full_item_name}' "
                 f"and refreshes '{target_region_name}'."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -2522,11 +2522,11 @@ def apex_add_file_upload(
         JSON with status, item_name, process_name, and instructions.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id not in session.pages:
-        return json.dumps({"status": "error", "error": f"Page {page_id} not found in session."})
+        return _json({"status": "error", "error": f"Page {page_id} not found in session."})
 
     # Resolve parent region
     region_id: int | None = None
@@ -2535,7 +2535,7 @@ def apex_add_file_upload(
             region_id = reg.region_id
             break
     if region_id is None:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"Region '{region_name}' not found on page {page_id}. Create it first with apex_add_region().",
         })
@@ -2626,7 +2626,7 @@ wwv_flow_imp_page.create_page_process(
         session.app_processes.append(process_name)
         created.append(f"process:{process_name}")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "item_name": full_item_name,
@@ -2647,7 +2647,7 @@ wwv_flow_imp_page.create_page_process(
                 f"added to page {page_id}. Uploads will be stored in "
                 f"{upper_table}.{upper_blob}."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

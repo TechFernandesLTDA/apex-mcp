@@ -120,6 +120,7 @@ class ImportSession:
 
     def reset(self) -> None:
         with self._lock:
+            old_app_id = self.app_id
             self.app_id = None
             self.app_name = None
             self.workspace_id = None
@@ -139,7 +140,7 @@ class ImportSession:
             self.processes.clear()
             self.branches.clear()
             self._created_components.clear()
-            _log.info("Session reset (app_id=%s)", self.app_id)
+            _log.info("Session reset (was app_id=%s)", old_app_id)
 
     def summary(self) -> dict:
         return {

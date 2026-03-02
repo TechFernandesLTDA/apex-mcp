@@ -5,7 +5,7 @@ from ..db import db
 from ..ids import ids
 from ..session import session, LovInfo, AuthSchemeInfo
 from ..config import WORKSPACE_ID
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
 
 
 def apex_add_lov(
@@ -50,9 +50,9 @@ def apex_add_lov(
                                     {"display": "No", "return": "N"}])
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         lov_id = ids.next(f"lov_{lov_name}")
@@ -60,7 +60,7 @@ def apex_add_lov(
 
         if lov_type_lower == "static":
             if not static_values:
-                return json.dumps({"status": "error", "error": "static_values is required for lov_type='static'."})
+                return _json({"status": "error", "error": "static_values is required for lov_type='static'."})
 
             # Build a UNION ALL SQL from static pairs
             union_parts: list[str] = []
@@ -73,7 +73,7 @@ def apex_add_lov(
         else:
             # sql type
             if not sql_query:
-                return json.dumps({"status": "error", "error": "sql_query is required for lov_type='sql'."})
+                return _json({"status": "error", "error": "sql_query is required for lov_type='sql'."})
             effective_query = sql_query
 
         # Split the query into lines for wwv_flow_string.join(wwv_flow_t_varchar2(...))
@@ -107,16 +107,16 @@ wwv_flow_imp_shared.create_list_of_values(
         # Register in session
         session.lovs[lov_name] = LovInfo(lov_id=lov_id, lov_name=lov_name)
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "lov_name": lov_name,
             "lov_id": lov_id,
             "lov_type": lov_type_lower,
             "message": f"LOV '{lov_name}' created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_auth_scheme(
@@ -157,9 +157,9 @@ def apex_add_auth_scheme(
             "Manager access required.")
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         scheme_id = ids.next(f"auth_scheme_{scheme_name}")
@@ -187,16 +187,16 @@ wwv_flow_imp_shared.create_security_scheme(
             scheme_name=scheme_name,
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "scheme_name": scheme_name,
             "scheme_id": scheme_id,
             "caching": caching,
             "message": f"Authorization scheme '{scheme_name}' created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_nav_item(
@@ -235,14 +235,14 @@ def apex_add_nav_item(
         - Sequence in multiples of 10 to allow future insertions
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         # Retrieve the nav_menu list ID registered during apex_create_app
         if not ids.has("nav_menu"):
-            return json.dumps({"status": "error", "error": "Navigation Menu not found. Call apex_create_app() first."})
+            return _json({"status": "error", "error": "Navigation Menu not found. Call apex_create_app() first."})
 
         nav_menu_id = ids.get("nav_menu")
         nav_item_id = ids.next(f"nav_item_{item_name}")
@@ -253,7 +253,7 @@ def apex_add_nav_item(
         parent_line = ""
         if parent_item:
             if not ids.has(f"nav_item_{parent_item}"):
-                return json.dumps({
+                return _json({
                     "status": "error",
                     "error": f"Parent nav item '{parent_item}' not found. Add it before the child item.",
                 })
@@ -288,7 +288,7 @@ wwv_flow_imp_shared.create_list_item(
             "parent_item": parent_item,
         })
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "item_name": item_name,
             "nav_item_id": nav_item_id,
@@ -298,15 +298,14 @@ wwv_flow_imp_shared.create_list_item(
             "auth_scheme": auth_scheme or None,
             "parent_item": parent_item or None,
             "message": f"Navigation item '{item_name}' -> page {target_page} created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_app_item(
     item_name: str,
-    scope: str = "SESSION",
     protection: str = "I",
     session_state_function: str = "",
 ) -> str:
@@ -318,13 +317,9 @@ def apex_add_app_item(
     Args:
         item_name: Item name (uppercase, e.g., "APP_USER_ROLE", "APP_CLINIC_ID").
                    Convention: prefix with APP_ to distinguish from page items.
-        scope: Variable scope:
-            - "SESSION": Available for the current session (default)
-            - "USER": Persisted across sessions for the same user
         protection: Security protection level:
-            - "RESTRICTED": Cannot be set via URL parameter (default, recommended)
-            - "CHECKSUM_REQUIRED": Can be set via URL with valid checksum
-            - "UNRESTRICTED": Can be set freely (use only for non-sensitive data)
+            - "I": Restricted — cannot be set via URL parameter (default, recommended)
+            - "C": Checksum required — can be set via URL with valid checksum
         session_state_function: PL/SQL to initialize the item value.
 
     Best practices:
@@ -339,9 +334,9 @@ def apex_add_app_item(
         apex_add_app_item("APP_USERNAME")
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         item_id = ids.next(f"app_item_{item_name}")
@@ -364,17 +359,16 @@ wwv_flow_imp_shared.create_flow_item(
         # Register in session
         session.app_items.append(item_name.upper())
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "item_name": item_name.upper(),
             "item_id": item_id,
-            "scope": scope,
             "protection": protection,
             "message": f"Application item '{item_name.upper()}' created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_app_process(
@@ -427,9 +421,9 @@ def apex_add_app_process(
         )
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     try:
         process_id = ids.next(f"app_process_{process_name}")
@@ -459,7 +453,7 @@ wwv_flow_imp_shared.create_flow_process(
         # Register in session
         session.app_processes.append(process_name)
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "process_name": process_name,
             "process_id": process_id,
@@ -468,7 +462,7 @@ wwv_flow_imp_shared.create_flow_process(
             "condition_type": condition_type or None,
             "condition_expr": condition_expr or None,
             "message": f"Application process '{process_name}' created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

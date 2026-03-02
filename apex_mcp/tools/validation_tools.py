@@ -4,7 +4,7 @@ import json
 from ..db import db
 from ..ids import ids
 from ..session import session
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
 
 
 def apex_add_item_validation(
@@ -52,9 +52,9 @@ def apex_add_item_validation(
         - Keep error messages user-friendly and specific
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     # Auto-prefix item name
     expected_prefix = f"P{page_id}_"
@@ -118,7 +118,7 @@ wwv_flow_imp_page.create_page_validation(
 {condition_line}
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "validation_id": val_id,
             "validation_name": validation_name,
@@ -127,10 +127,10 @@ wwv_flow_imp_page.create_page_validation(
             "page_id": page_id,
             "error_message": error_message,
             "message": f"Validation '{validation_name}' added to item '{item_name}' on page {page_id}.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_add_item_computation(
@@ -175,9 +175,9 @@ def apex_add_item_computation(
         - Avoid heavy computations — keep SQL queries simple and indexed
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     # Auto-prefix item name
     expected_prefix = f"P{page_id}_"
@@ -221,7 +221,7 @@ wwv_flow_imp_page.create_page_computation(
 {condition_line}
 );"""))
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "computation_id": comp_id,
             "item_name": item_name,
@@ -229,7 +229,7 @@ wwv_flow_imp_page.create_page_computation(
             "computation_point": apex_point,
             "page_id": page_id,
             "message": f"Computation added to item '{item_name}' on page {page_id} (point: {apex_point}).",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

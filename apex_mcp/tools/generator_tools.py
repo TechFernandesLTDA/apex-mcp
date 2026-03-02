@@ -5,7 +5,7 @@ from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo, RegionInfo, ItemInfo, LovInfo
 from ..templates import (
-    REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BLANK,
+    REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BLANK, REGION_TMPL_LOGIN,
     ITEM_TEXT, ITEM_NUMBER, ITEM_DATE, ITEM_SELECT, ITEM_HIDDEN,
     ITEM_TEXTAREA, ITEM_YES_NO, ITEM_PASSWORD, ITEM_DISPLAY,
     BTN_TMPL_TEXT, LABEL_OPTIONAL, LABEL_REQUIRED,
@@ -13,7 +13,8 @@ from ..templates import (
     PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN,
 )
 from ..config import WORKSPACE_ID, APEX_SCHEMA
-from ..utils import _esc, _blk, _sql_to_varchar2
+from ..utils import _json,  _esc, _blk, _sql_to_varchar2
+from ..validators import validate_table_name
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +182,15 @@ def apex_generate_crud(
         - IR has proper edit link to form
         - Cancel returns to list page
     """
+    try:
+        validate_table_name(table_name)
+    except ValueError as e:
+        return _json({"status": "error", "error": str(e)})
+
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     upper_table = table_name.upper()
     list_page_name = list_page_name or _humanize(upper_table)
@@ -208,7 +214,7 @@ def apex_generate_crud(
         """, {"tname": upper_table})
 
         if not cols:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Table '{upper_table}' not found or no columns returned.",
             })
@@ -685,7 +691,7 @@ wwv_flow_imp_page.create_page_da_event(
 );"""))
         log.append("Cancel DA event created")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "table": upper_table,
             "list_page_id": list_page_id,
@@ -705,10 +711,10 @@ wwv_flow_imp_page.create_page_da_event(
                 "skipped_blobs": skipped_blobs,
             },
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})
 
 
 # ---------------------------------------------------------------------------
@@ -748,9 +754,9 @@ def apex_generate_dashboard(
     Uses APEX Universal Theme PL/SQL dynamic content regions for KPIs.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     log: list[str] = []
 
@@ -883,7 +889,7 @@ wwv_flow_imp_page.create_worksheet(
 );"""))
         log.append("IR worksheet created")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "page_name": page_name,
@@ -895,10 +901,10 @@ wwv_flow_imp_page.create_worksheet(
                 "ir_region": ir_region_id,
             },
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})
 
 
 # ---------------------------------------------------------------------------
@@ -950,9 +956,9 @@ def apex_generate_login(
         - Proper error handling for bad credentials
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
 
     log: list[str] = []
     username_item = f"P{page_id}_USERNAME"
@@ -999,7 +1005,7 @@ wwv_flow_imp_page.create_page_plug(
 ,p_plug_name=>'{_esc(effective_app_name)}'
 ,p_icon_css_classes=>'app-login-icon'
 ,p_region_template_options=>'#DEFAULT#'
-,p_plug_template=>2101018444965420270
+,p_plug_template=>{REGION_TMPL_LOGIN}
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
 );"""))
@@ -1095,7 +1101,7 @@ wwv_flow_imp_page.create_page_process(
 );"""))
         log.append("Authentication process created")
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "page_name": page_name,
@@ -1107,7 +1113,7 @@ wwv_flow_imp_page.create_page_process(
                 f"matches page_id={page_id}."
             ),
             "log": log,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e), "log": log}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e), "log": log})

@@ -188,14 +188,16 @@ class TestSchemaIntegration:
     def test_list_tables(self, connected_db):
         from apex_mcp.tools.schema_tools import apex_list_tables
         result = json.loads(apex_list_tables(pattern="TEA_%"))
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert "table_name" in result[0] or "object_name" in result[0]
+        assert result.get("status") == "ok"
+        assert isinstance(result.get("data"), list)
+        assert result.get("count", 0) > 0
+        assert "table_name" in result["data"][0] or "object_name" in result["data"][0]
 
     def test_list_views(self, connected_db):
         from apex_mcp.tools.schema_tools import apex_list_tables
         result = json.loads(apex_list_tables(object_type="VIEW"))
-        assert isinstance(result, list)
+        assert result.get("status") == "ok"
+        assert isinstance(result.get("data"), list)
 
     def test_describe_table_has_sequences_triggers(self, connected_db):
         from apex_mcp.tools.schema_tools import apex_describe_table
@@ -217,9 +219,10 @@ class TestAppListIntegration:
         from apex_mcp.tools.app_tools import apex_list_apps
         result_str = apex_list_apps()
         result = json.loads(result_str)
-        assert isinstance(result, list)
-        assert len(result) > 0
-        app = result[0]
+        assert result.get("status") == "ok"
+        assert isinstance(result.get("data"), list)
+        assert result.get("count", 0) > 0
+        app = result["data"][0]
         assert "APPLICATION_ID" in app
         assert "STATUS" in app
 

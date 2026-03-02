@@ -1,9 +1,9 @@
 """Tools: apex_connect, apex_run_sql, apex_status."""
 from __future__ import annotations
-import json
 from ..db import db
 from ..session import session
 from ..config import DB_USER, DB_PASS, DB_DSN, WALLET_DIR, WALLET_PASS, WORKSPACE_ID
+from ..utils import _json
 
 
 def apex_connect(
@@ -44,12 +44,12 @@ def apex_connect(
         ("wallet_password / ORACLE_WALLET_PASSWORD", wallet_password),
     ] if not val]
     if missing:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": f"Missing required parameters: {', '.join(missing)}. "
                      "Set them via environment variables or pass directly. "
                      "Call apex_setup_guide() for full configuration instructions.",
-        }, ensure_ascii=False)
+        })
 
     try:
         msg = db.connect(
@@ -65,9 +65,9 @@ def apex_connect(
             _tmpl.discover_template_ids(db)
         except Exception:
             pass
-        return json.dumps({"status": "ok", "message": msg}, ensure_ascii=False)
+        return _json({"status": "ok", "message": msg})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_run_sql(sql: str, max_rows: int = 100, bind_params: dict | None = None) -> str:
@@ -92,7 +92,7 @@ def apex_run_sql(sql: str, max_rows: int = 100, bind_params: dict | None = None)
         apex_run_sql("BEGIN dbms_output.put_line('hello'); END;")
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     sql_stripped = sql.strip().upper()
     is_select = sql_stripped.startswith("SELECT") or sql_stripped.startswith("WITH")
@@ -103,16 +103,15 @@ def apex_run_sql(sql: str, max_rows: int = 100, bind_params: dict | None = None)
             rows = db.execute(sql, bind_params or {})
             if len(rows) > max_rows:
                 rows = rows[:max_rows]
-            return json.dumps({"status": "ok", "rows": rows, "count": len(rows)},
-                              default=str, ensure_ascii=False, indent=2)
+            return _json({"status": "ok", "rows": rows, "count": len(rows)})
         except Exception as e:
-            return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
+            return _json({"status": "error", "error": str(e)})
     else:
         try:
             db.plsql(sql, bind_params or {})
-            return json.dumps({"status": "ok", "message": "PL/SQL executed successfully."})
+            return _json({"status": "ok", "message": "PL/SQL executed successfully."})
         except Exception as e:
-            return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False)
+            return _json({"status": "error", "error": str(e)})
 
 
 def apex_status() -> str:
@@ -136,4 +135,4 @@ def apex_status() -> str:
             result["db_version"] = "unknown"
 
     result["session"] = session.summary()
-    return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+    return _json(result)

@@ -1,5 +1,6 @@
 """Shared utility helpers for apex-mcp tools."""
 from __future__ import annotations
+import json
 
 
 def _esc(value: str) -> str:
@@ -10,6 +11,11 @@ def _esc(value: str) -> str:
 def _blk(sql: str) -> str:
     """Wrap SQL in an anonymous PL/SQL begin...end; block."""
     return f"begin\n{sql}\nend;"
+
+
+def _json(obj) -> str:
+    """Serialize obj to a JSON string with consistent formatting."""
+    return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
 def _sql_to_varchar2(sql: str) -> str:

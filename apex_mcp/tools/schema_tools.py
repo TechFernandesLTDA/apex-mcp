@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from ..db import db
+from ..utils import _json
 
 # ---------------------------------------------------------------------------
 # Module-level TTL cache for apex_describe_table
@@ -49,11 +50,11 @@ def apex_list_tables(
     Use this to discover available tables/views before using apex_generate_crud or apex_describe_table.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     ot = object_type.upper()
     if ot not in ("TABLE", "VIEW", "ALL"):
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "object_type must be 'TABLE', 'VIEW', or 'ALL'.",
         })
@@ -105,7 +106,7 @@ def apex_list_tables(
                 }
                 for r in object_rows
             ]
-            return json.dumps({"status": "ok", "data": result, "count": len(result)}, default=str, ensure_ascii=False, indent=2)
+            return _json({"status": "ok", "data": result, "count": len(result)})
 
         # Fetch all columns for matching objects in a single query.
         # USER_TAB_COLUMNS covers both tables and views.
@@ -149,10 +150,10 @@ def apex_list_tables(
                 "columns":     columns_by_object.get(oname, []),
             })
 
-        return json.dumps({"status": "ok", "data": result, "count": len(result)}, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": result, "count": len(result)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_detect_relationships(tables: list[str]) -> str:
@@ -198,10 +199,10 @@ def apex_detect_relationships(tables: list[str]) -> str:
     provided ``tables`` list.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     if not tables:
-        return json.dumps({"status": "error", "error": "At least one table name is required."})
+        return _json({"status": "error", "error": "At least one table name is required."})
 
     upper_tables: list[str] = [t.upper() for t in tables]
     upper_set: set[str] = set(upper_tables)
@@ -317,15 +318,15 @@ def apex_detect_relationships(tables: list[str]) -> str:
             })
             suggestions.append(suggestion_text)
 
-        return json.dumps({
+        return _json({
             "status":        "ok",
             "tables":        upper_tables,
             "relationships": relationships,
             "suggestions":   suggestions,
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
@@ -381,7 +382,7 @@ def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
     Use this before apex_generate_crud to understand the table structure.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     upper_name = table_name.upper().strip()
     cache_key = upper_name
@@ -393,7 +394,7 @@ def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
             if cached:
                 ts, result = cached
                 if time.time() - ts < _CACHE_TTL:
-                    return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+                    return _json(result)
 
     try:
         # 1. Columns
@@ -412,10 +413,10 @@ def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
         """, {"tname": upper_name})
 
         if not col_rows:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Table '{upper_name}' not found or has no columns.",
-            }, ensure_ascii=False, indent=2)
+            })
 
         columns = []
         for c in col_rows:
@@ -593,7 +594,7 @@ def apex_describe_table(table_name: str, force_refresh: bool = False) -> str:
         with _describe_cache_lock:
             _describe_cache[cache_key] = (time.time(), result)
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

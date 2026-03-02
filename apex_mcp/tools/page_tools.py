@@ -4,9 +4,10 @@ import json
 from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo
-from ..templates import PAGE_TMPL_LOGIN
+from ..templates import PAGE_TMPL_LOGIN, REGION_TMPL_STANDARD
 from ..config import WORKSPACE_ID
-from ..utils import _esc, _blk
+from ..utils import _json,  _esc, _blk
+from ..validators import validate_page_id
 
 
 def apex_add_page(
@@ -43,13 +44,18 @@ def apex_add_page(
         - Login page should always be 101 or 100
         - Global page (ID 0) is applied to all pages — use for global JS/CSS
     """
+    try:
+        validate_page_id(page_id)
+    except ValueError as e:
+        return _json({"status": "error", "error": str(e)})
+
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:
-        return json.dumps({"status": "error", "error": "No import session active. Call apex_create_app() first."})
+        return _json({"status": "error", "error": "No import session active. Call apex_create_app() first."})
     if page_id in session.pages:
         existing = session.pages[page_id]
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": (
                 f"Page {page_id} already exists in this session ('{existing.page_name}'). "
@@ -101,7 +107,7 @@ wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
 ,p_plug_name=>'Global Page'
 ,p_region_template_options=>'#DEFAULT#'
-,p_plug_template=>4072358936313175081
+,p_plug_template=>{REGION_TMPL_STANDARD}
 ,p_plug_display_sequence=>10
 ,p_plug_display_point=>'BODY'
 );"""))
@@ -113,7 +119,7 @@ wwv_flow_imp_page.create_page_plug(
             page_type=page_type_lower,
         )
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "page_id": page_id,
             "page_name": page_name,
@@ -121,10 +127,10 @@ wwv_flow_imp_page.create_page_plug(
             "is_public": is_public,
             "auth_scheme": auth_scheme,
             "message": f"Page {page_id} '{page_name}' created successfully.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_pages(app_id: int | None = None) -> str:
@@ -141,11 +147,11 @@ def apex_list_pages(app_id: int | None = None) -> str:
             - count: total number of pages found
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     effective_app_id = app_id if app_id is not None else session.app_id
     if effective_app_id is None:
-        return json.dumps({"status": "error", "error": "No app_id provided and no active session. Pass app_id explicitly."})
+        return _json({"status": "error", "error": "No app_id provided and no active session. Pass app_id explicitly."})
 
     try:
         rows = db.execute("""
@@ -160,7 +166,7 @@ def apex_list_pages(app_id: int | None = None) -> str:
              ORDER BY page_id
         """, {"app_id": effective_app_id})
 
-        return json.dumps({"status": "ok", "data": rows, "count": len(rows)}, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

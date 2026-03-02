@@ -12,7 +12,7 @@ import json
 from ..db import db
 from ..config import DB_USER
 from ..config import WORKSPACE_ID
-from ..utils import _esc, _blk
+from ..utils import _esc, _blk, _json
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ def apex_get_app_details(app_id: int) -> str:
         - LOVs: name, source type, query
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Basic application info
@@ -67,7 +67,7 @@ def apex_get_app_details(app_id: int) -> str:
         """, {"app_id": app_id})
 
         if not apps:
-            return json.dumps({"status": "error", "error": f"Application {app_id} not found."})
+            return _json({"status": "error", "error": f"Application {app_id} not found."})
 
         app_info = apps[0]
 
@@ -151,10 +151,10 @@ def apex_get_app_details(app_id: int) -> str:
             "lovs": lovs,
         }
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_get_page_details(app_id: int, page_id: int) -> str:
@@ -171,7 +171,7 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
         JSON with page metadata and all component arrays.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Page-level metadata
@@ -192,7 +192,7 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
         """, {"app_id": app_id, "page_id": page_id})
 
         if not pages:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Page {page_id} not found in application {app_id}."
             })
@@ -286,17 +286,16 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
                    e.condition_expression1,
                    e.fire_on_page_load,
                    a.action,
-                   a.event_result,
                    a.action_sequence    AS action_seq,
                    a.attribute_01
-              FROM apex_application_page_da_events e
-              JOIN apex_application_page_da_actions a
+              FROM apex_application_page_da e
+              JOIN apex_application_page_da_acts a
                 ON a.application_id    = e.application_id
                AND a.page_id           = e.page_id
-               AND a.da_event_id       = e.dynamic_action_id
+               AND a.dynamic_action_id = e.dynamic_action_id
              WHERE e.application_id = :app_id
                AND e.page_id = :page_id
-             ORDER BY e.dynamic_action_name, a.event_result, a.action_sequence
+             ORDER BY e.dynamic_action_name, a.action_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
         # Group DA rows into a list of event objects each with nested actions[]
@@ -319,7 +318,6 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
                 _da_ordered.append(_event_obj)
             _da_seen[_name]["actions"].append({
                 "action": _r.get("ACTION") or _r.get("action"),
-                "event_result": _r.get("EVENT_RESULT") or _r.get("event_result"),
                 "sequence": _r.get("ACTION_SEQ") or _r.get("action_seq"),
                 "attribute_01": _r.get("ATTRIBUTE_01") or _r.get("attribute_01"),
             })
@@ -366,10 +364,10 @@ def apex_get_page_details(app_id: int, page_id: int) -> str:
             "validations": validations,
         }
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_regions(app_id: int, page_id: int) -> str:
@@ -383,7 +381,7 @@ def apex_list_regions(app_id: int, page_id: int) -> str:
         JSON array of regions with type, source, sequence, and condition info.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         rows = db.execute("""
@@ -407,10 +405,10 @@ def apex_list_regions(app_id: int, page_id: int) -> str:
              ORDER BY display_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_items(app_id: int, page_id: int, region_name: str = "") -> str:
@@ -425,7 +423,7 @@ def apex_list_items(app_id: int, page_id: int, region_name: str = "") -> str:
         JSON array of items with type, label, source, LOV, and validation info.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         params: dict = {"app_id": app_id, "page_id": page_id}
@@ -457,10 +455,10 @@ def apex_list_items(app_id: int, page_id: int, region_name: str = "") -> str:
              ORDER BY item_sequence
         """, params)
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_processes(app_id: int, page_id: int) -> str:
@@ -475,7 +473,7 @@ def apex_list_processes(app_id: int, page_id: int) -> str:
         condition, error and success messages.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         rows = db.execute("""
@@ -496,10 +494,10 @@ def apex_list_processes(app_id: int, page_id: int) -> str:
              ORDER BY process_sequence
         """, {"app_id": app_id, "page_id": page_id})
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_dynamic_actions(app_id: int, page_id: int) -> str:
@@ -513,7 +511,7 @@ def apex_list_dynamic_actions(app_id: int, page_id: int) -> str:
         JSON array of dynamic actions, each with their associated action steps.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # DA event headers
@@ -561,10 +559,10 @@ def apex_list_dynamic_actions(app_id: int, page_id: int) -> str:
             ev_copy["actions"] = acts_by_da.get(da_id_str, [])
             result.append(ev_copy)
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": result, "count": len(result)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_lovs(app_id: int) -> str:
@@ -577,7 +575,7 @@ def apex_list_lovs(app_id: int) -> str:
         JSON array with LOV name, type, query, and timestamps.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         rows = db.execute("""
@@ -591,10 +589,10 @@ def apex_list_lovs(app_id: int) -> str:
              ORDER BY lov_name
         """, {"app_id": app_id})
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_list_auth_schemes(app_id: int) -> str:
@@ -608,7 +606,7 @@ def apex_list_auth_schemes(app_id: int) -> str:
         error message, and caching setting.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         rows = db.execute("""
@@ -622,10 +620,10 @@ def apex_list_auth_schemes(app_id: int) -> str:
              ORDER BY authorization_scheme_name
         """, {"app_id": app_id})
 
-        return json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        return _json({"status": "ok", "data": rows, "count": len(rows)})
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -669,14 +667,14 @@ def apex_update_region(
         JSON with status and what was changed.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     # At least one change must be requested
     if all(v is None for v in [
         new_name, new_source_sql, new_static_content,
         new_sequence, new_auth_scheme, new_condition_type, new_condition_expr,
     ]):
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "No changes specified. Provide at least one new_* parameter."
         })
@@ -692,7 +690,7 @@ def apex_update_region(
         """, {"app_id": app_id, "page_id": page_id, "region_name": region_name})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Region '{region_name}' not found on page {page_id} of app {app_id}. "
@@ -754,7 +752,7 @@ def apex_update_region(
         db.execute(update_sql, params)
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
@@ -762,7 +760,7 @@ def apex_update_region(
             "changed": changed,
             "message": f"Region '{region_name}' on page {page_id} updated successfully.",
             "warning": "Direct table update performed. Verify changes in APEX App Builder.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
         err_msg = str(e)
@@ -772,10 +770,10 @@ def apex_update_region(
                 f" Hint: Grant UPDATE privilege as ADMIN: "
                 f"GRANT UPDATE ON WWV_FLOW_PAGE_PLUGS TO {DB_USER};"
             )
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": err_msg + hint
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 def apex_update_item(
@@ -816,13 +814,13 @@ def apex_update_item(
         JSON with status and changed fields.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     if all(v is None for v in [
         new_label, new_item_type, new_default_value, new_source_column,
         new_lov_definition, new_is_required, new_placeholder, new_read_only,
     ]):
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "No changes specified. Provide at least one new_* parameter."
         })
@@ -838,7 +836,7 @@ def apex_update_item(
         """, {"app_id": app_id, "page_id": page_id, "item_name": item_name})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Item '{item_name}' not found on page {page_id} of app {app_id}. "
@@ -872,9 +870,7 @@ def apex_update_item(
             changed["source"] = new_source_column
 
         if new_lov_definition is not None:
-            set_clauses.append("lov => :new_lov_definition")
-            # lov column name in the table is just "lov"
-            set_clauses[-1] = "lov = :new_lov_definition"
+            set_clauses.append("lov = :new_lov_definition")
             params["new_lov_definition"] = new_lov_definition
             changed["lov"] = "(updated)"
 
@@ -898,7 +894,7 @@ def apex_update_item(
             changed["read_only_when_type"] = ro_val
 
         if not set_clauses:
-            return json.dumps({"status": "error", "error": "No valid changes to apply."})
+            return _json({"status": "error", "error": "No valid changes to apply."})
 
         set_clause_str = ", ".join(set_clauses)
         update_sql = f"""
@@ -913,7 +909,7 @@ def apex_update_item(
         db.execute(update_sql, params)
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
@@ -921,7 +917,7 @@ def apex_update_item(
             "changed": changed,
             "message": f"Item '{item_name}' on page {page_id} updated successfully.",
             "warning": "Direct table update performed. Verify changes in APEX App Builder.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
         err_msg = str(e)
@@ -931,10 +927,10 @@ def apex_update_item(
                 f" Hint: Grant UPDATE privilege as ADMIN: "
                 f"GRANT UPDATE ON WWV_FLOW_STEP_ITEMS TO {DB_USER};"
             )
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": err_msg + hint
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -957,10 +953,10 @@ def apex_delete_page(app_id: int, page_id: int) -> str:
         JSON with status.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     if page_id == 0:
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "Cannot delete page 0 (global page). The global page is required by APEX."
         })
@@ -975,7 +971,7 @@ def apex_delete_page(app_id: int, page_id: int) -> str:
         """, {"app_id": app_id, "page_id": page_id})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Page {page_id} not found in application {app_id}."
             })
@@ -1025,14 +1021,14 @@ def apex_delete_page(app_id: int, page_id: int) -> str:
 
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
             "page_name": page_name,
             "message": f"Page {page_id} '{page_name}' deleted from application {app_id}.",
             "warning": "This deletion is permanent. Restore from backup if needed.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
         err_msg = str(e)
@@ -1042,10 +1038,10 @@ def apex_delete_page(app_id: int, page_id: int) -> str:
                 " Hint: Grant DELETE privilege as ADMIN on the relevant APEX internal tables "
                 "or use the APEX App Builder UI to delete the page."
             )
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": err_msg + hint
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
@@ -1062,7 +1058,7 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
         JSON with status and number of child items deleted.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Look up the internal region id (plug id) from WWV_FLOW_PAGE_PLUGS
@@ -1075,7 +1071,7 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
         """, {"app_id": app_id, "page_id": page_id, "region_name": region_name})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Region '{region_name}' not found on page {page_id} of app {app_id}. "
@@ -1132,7 +1128,7 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
 
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
@@ -1144,7 +1140,7 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
                 f"{int(items_deleted)} child item(s) also removed."
             ),
             "warning": "This deletion is permanent. Restore from backup if needed.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
         err_msg = str(e)
@@ -1155,10 +1151,10 @@ def apex_delete_region(app_id: int, page_id: int, region_name: str) -> str:
                 f"GRANT DELETE ON WWV_FLOW_PAGE_PLUGS TO {DB_USER}; "
                 f"GRANT DELETE ON WWV_FLOW_STEP_ITEMS TO {DB_USER};"
             )
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": err_msg + hint
-        }, ensure_ascii=False, indent=2)
+        })
 
 
 def apex_delete_item(app_id: int, page_id: int, item_name: str) -> str:
@@ -1173,7 +1169,7 @@ def apex_delete_item(app_id: int, page_id: int, item_name: str) -> str:
         JSON with status and deleted item name.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         existing = db.execute("""
@@ -1185,7 +1181,7 @@ def apex_delete_item(app_id: int, page_id: int, item_name: str) -> str:
         """, {"app_id": app_id, "page_id": page_id, "item_name": item_name})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Item '{item_name}' not found on page {page_id} of app {app_id}."
@@ -1203,17 +1199,17 @@ DELETE FROM wwv_flow_step_items
 """))
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
             "item_name": found_name,
             "message": f"Item '{found_name}' deleted from page {page_id} of app {app_id}.",
             "warning": "This deletion is permanent.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_delete_button(app_id: int, page_id: int, button_name: str) -> str:
@@ -1228,7 +1224,7 @@ def apex_delete_button(app_id: int, page_id: int, button_name: str) -> str:
         JSON with status and deleted button name.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         existing = db.execute("""
@@ -1240,7 +1236,7 @@ def apex_delete_button(app_id: int, page_id: int, button_name: str) -> str:
         """, {"app_id": app_id, "page_id": page_id, "button_name": button_name})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Button '{button_name}' not found on page {page_id} of app {app_id}."
@@ -1258,17 +1254,17 @@ DELETE FROM wwv_flow_step_buttons
 """))
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
             "button_name": found_name,
             "message": f"Button '{found_name}' deleted from page {page_id} of app {app_id}.",
             "warning": "This deletion is permanent.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_update_page(
@@ -1293,10 +1289,10 @@ def apex_update_page(
         JSON with status and updated fields.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     if not any([new_name, new_title, new_auth_scheme is not None, new_page_mode]):
-        return json.dumps({
+        return _json({
             "status": "error",
             "error": "Provide at least one field to update: new_name, new_title, new_auth_scheme, or new_page_mode.",
         })
@@ -1311,7 +1307,7 @@ def apex_update_page(
         """, {"app_id": app_id, "page_id": page_id})
 
         if not existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Page {page_id} not found in application {app_id}.",
             })
@@ -1338,7 +1334,7 @@ def apex_update_page(
             valid_modes = {"NORMAL", "MODAL_DIALOG", "NON_MODAL_DIALOG"}
             mode_upper = new_page_mode.upper()
             if mode_upper not in valid_modes:
-                return json.dumps({
+                return _json({
                     "status": "error",
                     "error": f"new_page_mode '{new_page_mode}' invalid. Valid: {sorted(valid_modes)}",
                 })
@@ -1354,17 +1350,17 @@ UPDATE wwv_flow_steps
 """))
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "app_id": app_id,
             "page_id": page_id,
             "updated_fields": updated_fields,
             "message": f"Page {page_id} updated in app {app_id}.",
             "warning": "Verify changes in APEX App Builder.",
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 def apex_copy_page(
@@ -1387,7 +1383,7 @@ def apex_copy_page(
         JSON with status and new page details.
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # Verify the source page exists and get its name
@@ -1399,7 +1395,7 @@ def apex_copy_page(
         """, {"app_id": source_app_id, "page_id": source_page_id})
 
         if not src_pages:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Source page {source_page_id} not found in application {source_app_id}."
             })
@@ -1416,7 +1412,7 @@ def apex_copy_page(
         """, {"app_id": target_app_id, "page_id": target_page_id})
 
         if target_existing:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": (
                     f"Target page {target_page_id} already exists in application {target_app_id}. "
@@ -1446,7 +1442,7 @@ def apex_copy_page(
     p_to_step_name  => '{_esc(resolved_name)}'
   );"""))
             except Exception as fallback_err:
-                return json.dumps({
+                return _json({
                     "status": "error",
                     "error": (
                         f"Both copy APIs failed. "
@@ -1454,11 +1450,11 @@ def apex_copy_page(
                         f"Fallback: {fallback_err}. "
                         "Consider using the APEX App Builder UI to copy the page."
                     )
-                }, ensure_ascii=False, indent=2)
+                })
 
         db.conn.commit()
 
-        return json.dumps({
+        return _json({
             "status": "ok",
             "source_app_id": source_app_id,
             "source_page_id": source_page_id,
@@ -1469,10 +1465,10 @@ def apex_copy_page(
                 f"Page {source_page_id} '{orig_name}' from app {source_app_id} "
                 f"copied to page {target_page_id} '{resolved_name}' in app {target_app_id}."
             ),
-        }, ensure_ascii=False, indent=2)
+        })
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -1515,7 +1511,7 @@ def apex_diff_app(app_id_1: int, app_id_2: int) -> str:
         }
     """
     if not db.is_connected():
-        return json.dumps({"status": "error", "error": "Not connected. Call apex_connect() first."})
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
 
     try:
         # --- 1. Basic app info for both apps ---
@@ -1533,12 +1529,12 @@ def apex_diff_app(app_id_1: int, app_id_2: int) -> str:
         info_2 = _get_app_info(app_id_2)
 
         if info_1 is None:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Application {app_id_1} not found."
             })
         if info_2 is None:
-            return json.dumps({
+            return _json({
                 "status": "error",
                 "error": f"Application {app_id_2} not found."
             })
@@ -1684,7 +1680,7 @@ def apex_diff_app(app_id_1: int, app_id_2: int) -> str:
             },
         }
 
-        return json.dumps(result, default=str, ensure_ascii=False, indent=2)
+        return _json(result)
 
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)}, ensure_ascii=False, indent=2)
+        return _json({"status": "error", "error": str(e)})

@@ -5,6 +5,9 @@ Call `discover_template_ids()` after connecting to refresh them from the live da
 This is recommended when running against a different APEX version or workspace.
 """
 from __future__ import annotations
+import logging
+
+_log = logging.getLogger("apex_mcp.templates")
 
 
 def discover_template_ids(db=None) -> dict:
@@ -27,7 +30,7 @@ def discover_template_ids(db=None) -> dict:
         templates.discover_template_ids(db)
     """
     global PAGE_TMPL_STANDARD, PAGE_TMPL_LOGIN, PAGE_TMPL_DIALOG
-    global REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BLANK, REGION_TMPL_BUTTONS, REGION_TMPL_CARDS
+    global REGION_TMPL_STANDARD, REGION_TMPL_IR, REGION_TMPL_BLANK, REGION_TMPL_BUTTONS, REGION_TMPL_CARDS, REGION_TMPL_LOGIN
     global BTN_TMPL_TEXT, BTN_TMPL_ICON
     global LABEL_OPTIONAL, LABEL_REQUIRED
     global LIST_TMPL_SIDE_NAV, LIST_TMPL_TOP_NAV, LIST_TMPL_NAVBAR
@@ -74,7 +77,7 @@ def discover_template_ids(db=None) -> dict:
              WHERE theme_number = 42
                AND template_type = 'REGION'
                AND template_name IN ('Standard', 'Interactive Report', 'Blank with Attributes',
-                                     'Buttons Container', 'Cards')
+                                     'Buttons Container', 'Cards', 'Login')
         """)
         for r in rows:
             name = r.get("TEMPLATE_NAME", "")
@@ -94,6 +97,45 @@ def discover_template_ids(db=None) -> dict:
             elif tid and "Cards" in name:
                 REGION_TMPL_CARDS = tid
                 discovered["REGION_TMPL_CARDS"] = tid
+            elif tid and name == "Login":
+                REGION_TMPL_LOGIN = tid
+                discovered["REGION_TMPL_LOGIN"] = tid
+
+        # Button templates
+        rows = db.execute("""
+            SELECT template_name, template_id
+              FROM apex_application_templates
+             WHERE theme_number = 42
+               AND template_type = 'BUTTON'
+               AND template_name IN ('Text', 'Icon')
+        """)
+        for r in rows:
+            name = r.get("TEMPLATE_NAME", "")
+            tid = r.get("TEMPLATE_ID")
+            if tid and name == "Text":
+                BTN_TMPL_TEXT = tid
+                discovered["BTN_TMPL_TEXT"] = tid
+            elif tid and name == "Icon":
+                BTN_TMPL_ICON = tid
+                discovered["BTN_TMPL_ICON"] = tid
+
+        # Label templates
+        rows = db.execute("""
+            SELECT template_name, template_id
+              FROM apex_application_templates
+             WHERE theme_number = 42
+               AND template_type = 'FIELD'
+               AND template_name IN ('Optional', 'Required')
+        """)
+        for r in rows:
+            name = r.get("TEMPLATE_NAME", "")
+            tid = r.get("TEMPLATE_ID")
+            if tid and name == "Optional":
+                LABEL_OPTIONAL = tid
+                discovered["LABEL_OPTIONAL"] = tid
+            elif tid and name == "Required":
+                LABEL_REQUIRED = tid
+                discovered["LABEL_REQUIRED"] = tid
 
         # Theme style (Redwood Light)
         rows = db.execute("""
@@ -128,8 +170,8 @@ def discover_template_ids(db=None) -> dict:
                 LIST_TMPL_NAVBAR = tid
                 discovered["LIST_TMPL_NAVBAR"] = tid
 
-    except Exception:
-        pass  # Keep hardcoded fallbacks on any error
+    except Exception as e:
+        _log.warning("Template discovery failed: %s", e)
 
     return discovered
 
@@ -146,6 +188,7 @@ REGION_TMPL_HERO      = None                 # Hero (not used for regions direct
 REGION_TMPL_BLANK     = 2600971555240739962  # Blank with Attributes
 REGION_TMPL_BUTTONS   = 2126429139436695430  # Buttons Container (dialog footer)
 REGION_TMPL_CARDS     = 2538654340625403440  # Cards
+REGION_TMPL_LOGIN     = 2101018444965420270  # Login region
 
 # ── Button Templates ──────────────────────────────────────────────────────────
 BTN_TMPL_TEXT         = 4072362960822175091  # Text (default)

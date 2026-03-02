@@ -36,6 +36,7 @@ _REQUIRED_VARS = {
     "ORACLE_WALLET_DIR": WALLET_DIR,
     "APEX_WORKSPACE_ID": _ws_id_str,
     "APEX_SCHEMA": APEX_SCHEMA,
+    "APEX_WORKSPACE_NAME": WORKSPACE_NAME,
 }
 _missing = [k for k, v in _REQUIRED_VARS.items() if not v or v == "0"]
 if _missing:
