@@ -19,6 +19,9 @@ Tabelas excluídas intencionalmente:
 """
 import os, json, sys, time
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # ── Credenciais do ambiente TEA ──────────────────────────────────────────────
 os.environ.update({
     "ORACLE_DB_USER":        "TEA_APP",

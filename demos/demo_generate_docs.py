@@ -9,6 +9,9 @@ Saída:
 """
 import os, sys, json, time, textwrap
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # ── Credenciais TEA ───────────────────────────────────────────────────────────
 os.environ.update({
     "ORACLE_DB_USER":         "TEA_APP",

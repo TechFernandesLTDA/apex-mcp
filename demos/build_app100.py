@@ -15,6 +15,9 @@ Páginas criadas:
 """
 import os, json, sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 os.environ.update({
     "ORACLE_DB_USER": "TEA_APP", "ORACLE_DB_PASS": "TeaApp@2024#Unimed",
     "ORACLE_DSN": "u5cvlivnjuodscai_tp",
