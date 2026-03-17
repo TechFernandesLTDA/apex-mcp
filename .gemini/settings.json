@@ -13,6 +13,11 @@
         "APEX_SCHEMA": "YOUR_SCHEMA",
         "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
       }
+    },
+    "sqlcl": {
+      "command": "/path/to/sqlcl/bin/sql",
+      "args": ["-mcp"],
+      "env": {}
     }
   }
 }
