@@ -1,6 +1,6 @@
 """Tools: apex_add_lov, apex_add_auth_scheme, apex_add_nav_item, apex_add_app_item, apex_add_app_process."""
 from __future__ import annotations
-import json
+
 from ..db import db
 from ..ids import ids
 from ..session import session, LovInfo, AuthSchemeInfo

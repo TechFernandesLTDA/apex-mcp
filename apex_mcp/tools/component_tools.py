@@ -1,6 +1,6 @@
 """Tools: apex_add_region, apex_add_item, apex_add_button, apex_add_process, apex_add_dynamic_action."""
 from __future__ import annotations
-import json
+
 from ..db import db
 from ..ids import ids
 from ..session import session, RegionInfo, ItemInfo, ProcessInfo, DynamicActionInfo
@@ -38,7 +38,19 @@ from ..utils import _json,  _esc, _blk, _sql_to_varchar2
 
 
 def _find_region_id(page_id: int, region_name: str) -> int | None:
-    """Look up a region ID by page and name from session state."""
+    """Look up a region ID by page and name from session state.
+
+    Iterates over all tracked regions and returns the ID of the first
+    match for the given *page_id* and *region_name*.  Returns ``None``
+    when no matching region is found.
+
+    Args:
+        page_id: The page to search within.
+        region_name: The display name of the region.
+
+    Returns:
+        The numeric region ID, or ``None`` if not found.
+    """
     for reg in session.regions.values():
         if reg.page_id == page_id and reg.region_name == region_name:
             return reg.region_id
@@ -46,7 +58,18 @@ def _find_region_id(page_id: int, region_name: str) -> int | None:
 
 
 def _ensure_item_prefix(item_name: str, page_id: int) -> str:
-    """Ensure item name starts with P{page_id}_ prefix."""
+    """Ensure *item_name* starts with the ``P{page_id}_`` prefix.
+
+    APEX convention requires page items to be named ``P<page_id>_<NAME>``.
+    If the caller omits the prefix, this function prepends it automatically.
+
+    Args:
+        item_name: The raw item name (e.g. ``"FIRST_NAME"`` or ``"P10_FIRST_NAME"``).
+        page_id: The owning page ID.
+
+    Returns:
+        The correctly prefixed item name.
+    """
     expected_prefix = f"P{page_id}_"
     if not item_name.upper().startswith(expected_prefix.upper()):
         return f"{expected_prefix}{item_name}"

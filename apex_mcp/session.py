@@ -1,9 +1,17 @@
-"""Import session state tracking."""
+"""Import session state tracking.
+
+The :class:`ImportSession` singleton keeps an in-memory representation
+of all components created during the current ``apex_create_app`` →
+``apex_finalize_app`` lifecycle.  It is used by tool functions to
+resolve cross-references (e.g. region IDs when adding items) and by
+``apex_status()`` / ``apex_validate_app()`` to report session health.
+"""
 from __future__ import annotations
+
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 _log = logging.getLogger("apex_mcp.session")
 
@@ -142,7 +150,8 @@ class ImportSession:
             self._created_components.clear()
             _log.info("Session reset (was app_id=%s)", old_app_id)
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
+        """Return a serializable summary of the current session state."""
         return {
             "app_id": self.app_id,
             "app_name": self.app_name,

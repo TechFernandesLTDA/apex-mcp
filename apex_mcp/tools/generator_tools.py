@@ -1,6 +1,6 @@
 """Tools: apex_generate_crud, apex_generate_dashboard, apex_generate_login."""
 from __future__ import annotations
-import json
+
 from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo, RegionInfo, ItemInfo, LovInfo

@@ -1,6 +1,6 @@
 """Tools: apex_add_page, apex_list_pages."""
 from __future__ import annotations
-import json
+
 from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo

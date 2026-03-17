@@ -1,6 +1,6 @@
 """Tools: apex_list_tables, apex_describe_table."""
 from __future__ import annotations
-import json
+
 import threading
 import time
 from ..db import db

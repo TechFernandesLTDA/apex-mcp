@@ -10,7 +10,10 @@ from ..utils import _json,  _esc, _blk
 
 
 def _camel(name: str) -> str:
-    """Convert UPPER_SNAKE_CASE to camelCase (e.g. SAVE_RECORD -> saveRecord)."""
+    """Convert ``UPPER_SNAKE_CASE`` to ``camelCase``.
+
+    Example: ``SAVE_RECORD`` → ``saveRecord``.
+    """
     parts = name.lower().split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
 

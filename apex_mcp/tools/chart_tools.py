@@ -19,6 +19,16 @@ _ZOOM_BOOLS = (
 
 
 def _jet_region(region_id: int, region_name: str, sequence: int) -> None:
+    """Create a JET chart container region (``NATIVE_JET_CHART`` plug).
+
+    This is the outer region that hosts the chart.  Call
+    :func:`_jet_axis` and ``create_jet_chart_series`` after this.
+
+    Args:
+        region_id: Unique region ID (from :func:`ids.next`).
+        region_name: Display name of the region.
+        sequence: Display sequence on the page.
+    """
     db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_plug(
  p_id=>wwv_flow_imp.id({region_id})
@@ -35,6 +45,15 @@ wwv_flow_imp_page.create_page_plug(
 
 def _jet_axis(chart_id: int, axis: str, ax_id: int,
               title: str = "", y2: bool = False) -> None:
+    """Create a chart axis definition (X, Y, or Y2).
+
+    Args:
+        chart_id: The parent JET chart ID.
+        axis: Axis identifier — ``'x'``, ``'y'``, or ``'y2'``.
+        ax_id: Unique ID for this axis object.
+        title: Optional axis title label.
+        y2: Whether this is a secondary Y axis (currently unused, reserved).
+    """
     t_line = f",p_title=>'{_esc(title)}'" if title else ""
     db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_axis(
@@ -48,6 +67,12 @@ wwv_flow_imp_page.create_jet_chart_axis(
 
 
 def _guard(page_id: int) -> str | None:
+    """Pre-condition check for chart tools.
+
+    Returns a JSON error string if the database is not connected, no
+    import session is active, or the given *page_id* is not in the
+    session.  Returns ``None`` when all checks pass.
+    """
     if not db.is_connected():
         return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
     if not session.import_begun:

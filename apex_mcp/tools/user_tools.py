@@ -1,6 +1,6 @@
 """Tools: apex_create_user, apex_list_users."""
 from __future__ import annotations
-import json
+
 from ..db import db
 from ..config import WORKSPACE_ID
 from ..utils import _json,  _esc, _blk

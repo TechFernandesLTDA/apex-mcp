@@ -1,10 +1,17 @@
-"""Oracle ADB connection manager (singleton, mTLS wallet)."""
+"""Oracle ADB connection manager (singleton, mTLS wallet).
+
+Provides a thread-safe :class:`ConnectionManager` singleton with auto-reconnect
+on transient Oracle errors, dry-run mode, and batch execution support.
+"""
 from __future__ import annotations
+
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
+
 import oracledb
+
 from .config import DB_USER, DB_PASS, DB_DSN, WALLET_DIR, WALLET_PASS, WORKSPACE_ID, APEX_SCHEMA
 
 _log = logging.getLogger("apex_mcp.db")
@@ -173,6 +180,7 @@ class ConnectionManager:
                     time.sleep(1)
                     continue
                 raise
+        raise last_exc  # pragma: no cover — shouldn't reach here
 
     def enable_dry_run(self) -> None:
         """Enable dry-run mode: plsql() calls are logged but NOT executed."""

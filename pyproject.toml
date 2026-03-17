@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "apex-mcp"
-version = "0.2.0"
-description = "MCP Server for Oracle APEX 24.2 — 86 tools, works with Claude, GPT, Gemini, Cursor, VS Code"
+version = "0.3.0"
+description = "MCP Server for Oracle APEX 24.2 — 116 tools, works with Claude, GPT, Gemini, Cursor, VS Code"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
