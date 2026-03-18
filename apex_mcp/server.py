@@ -22,6 +22,7 @@ import argparse
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 
@@ -38,6 +39,7 @@ from .tools.app_tools import (
     apex_export_app,
     apex_describe_page,
     apex_dry_run_preview,
+    apex_undo_last,
 )
 from .tools.page_tools import apex_add_page, apex_list_pages
 from .tools.component_tools import (
@@ -90,6 +92,9 @@ from .tools.setup_tools import (
     apex_check_requirements,
     apex_check_permissions,
     apex_fix_permissions,
+    apex_refresh_templates,
+    apex_health_check,
+    apex_get_audit_log,
 )
 from .tools.validation_tools import apex_add_item_validation, apex_add_item_computation
 from .tools.visual_tools import (
@@ -163,9 +168,28 @@ from .tools.chart_tools import (
     apex_add_bubble_chart,
 )
 
+# ── Lifespan handler ──────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(server):
+    """Manage server lifecycle — cleanup DB connections on shutdown."""
+    logging.getLogger("apex_mcp.server").info("apex-mcp starting")
+    yield
+    # Cleanup on shutdown
+    from .db import db
+    if db.is_connected():
+        try:
+            db._conn.close()
+            db._conn = None
+        except Exception:
+            pass
+    logging.getLogger("apex_mcp.server").info("apex-mcp stopped")
+
+
 # ── Server definition ─────────────────────────────────────────────────────────
 mcp = FastMCP(
     name="apex-mcp",
+    lifespan=lifespan,
     instructions="""
 You are connected to an Oracle APEX 24.2 development environment via MCP.
 
@@ -362,6 +386,9 @@ mcp.tool(annotations=_READ, tags={"setup"})(apex_setup_guide)
 mcp.tool(annotations=_READ, tags={"setup"})(apex_check_requirements)
 mcp.tool(annotations=_READ, tags={"setup"})(apex_check_permissions)
 mcp.tool(annotations=_SAFE, tags={"setup"})(apex_fix_permissions)
+mcp.tool(annotations=_SAFE, tags={"setup"})(apex_refresh_templates)
+mcp.tool(annotations=_READ, tags={"setup"})(apex_health_check)
+mcp.tool(annotations=_READ, tags={"setup"})(apex_get_audit_log)
 
 # Connection & session
 mcp.tool(annotations=_SAFE, tags={"connection"})(apex_connect)
@@ -376,6 +403,7 @@ mcp.tool(annotations=_DELETE, tags={"app"})(apex_delete_app)
 mcp.tool(annotations=_READ, tags={"app"})(apex_export_app)
 mcp.tool(annotations=_READ, tags={"app"})(apex_describe_page)
 mcp.tool(annotations=_SAFE, tags={"app"})(apex_dry_run_preview)
+mcp.tool(annotations=_DELETE, tags={"app"})(apex_undo_last)
 
 # Pages
 mcp.tool(annotations=_WRITE, tags={"page"})(apex_add_page)

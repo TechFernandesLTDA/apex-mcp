@@ -4,14 +4,30 @@ build-backend = "hatchling.build"
 
 [project]
 name = "apex-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP Server for Oracle APEX 24.2 — 116 tools, works with Claude, GPT, Gemini, Cursor, VS Code"
 readme = "README.md"
+license = "MIT"
+keywords = ["oracle", "apex", "mcp", "model-context-protocol", "ai", "low-code"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Code Generators",
+]
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=3.0.0",
     "oracledb>=2.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TechFernandesLTDA/apex-mcp"
+Repository = "https://github.com/TechFernandesLTDA/apex-mcp"
+Issues = "https://github.com/TechFernandesLTDA/apex-mcp/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

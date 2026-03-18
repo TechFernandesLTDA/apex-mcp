@@ -18,7 +18,19 @@ _log = logging.getLogger("apex_mcp.db")
 
 # Oracle error codes that indicate a transient connection failure and
 # can be safely retried after re-establishing the connection.
-_TRANSIENT_ORA_CODES = {"03113", "03114", "12170", "25408"}
+_TRANSIENT_ORA_CODES = {
+    "03113",  # end-of-file on communication channel
+    "03114",  # not connected to ORACLE
+    "03135",  # connection lost contact
+    "12170",  # TNS:connect timeout occurred
+    "12541",  # TNS:no listener
+    "12543",  # TNS:destination host unreachable
+    "25408",  # cannot safely replay call
+    "01033",  # ORACLE initialization or shutdown in progress
+    "01089",  # immediate shutdown or close in progress
+    "12514",  # TNS:listener does not know of service
+    "12528",  # TNS:listener: all appropriate instances are blocking new connections
+}
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -122,6 +134,40 @@ class ConnectionManager:
                     continue
                 raise
         raise last_exc  # shouldn't reach here
+
+    def execute_safe(self, sql: str, params: dict | None = None,
+                     timeout_sec: int = 30, max_rows: int = 10000) -> list[dict]:
+        """Execute SQL with timeout and row limit. Use for user-facing queries."""
+        last_exc = None
+        for attempt in range(3):
+            try:
+                c = self.conn
+                cur = c.cursor()
+                try:
+                    cur.callTimeout = timeout_sec * 1000
+                    cur.execute(sql, params or {})
+                    if cur.description:
+                        cols = [d[0] for d in cur.description]
+                        rows = cur.fetchmany(max_rows)
+                        result = [dict(zip(cols, row)) for row in rows]
+                        remaining = cur.fetchone()
+                        if remaining is not None:
+                            _log.warning("Query exceeded %d rows, result truncated", max_rows)
+                        return result
+                    return []
+                finally:
+                    cur.callTimeout = 0
+                    cur.close()
+            except Exception as exc:
+                last_exc = exc
+                if _is_transient(exc) and attempt < 2:
+                    _log.warning("Transient error on safe execute attempt %d: %s", attempt + 1, exc)
+                    with self._conn_lock:
+                        self._conn = None
+                    time.sleep(1)
+                    continue
+                raise
+        raise last_exc
 
     def execute_many(self, statements: list[str]) -> list[str]:
         """Execute multiple PL/SQL anonymous blocks, return log lines."""
@@ -331,6 +377,23 @@ end;
             return True
         except Exception:
             return False
+
+    def health_metrics(self) -> dict:
+        """Return connection health metrics for diagnostics."""
+        metrics = {
+            "connected": self.is_connected(),
+            "dry_run": self.dry_run,
+            "batch_mode": self.batch_mode,
+            "batch_queue_size": len(self._batch_queue),
+            "col_cache_size": len(self._col_cache),
+        }
+        if self._conn is not None:
+            try:
+                metrics["oracle_version"] = self._conn.version
+                metrics["thin_mode"] = self._conn.thin
+            except Exception:
+                pass
+        return metrics
 
 
 # Module-level shortcut

@@ -1,6 +1,8 @@
 """Tools: apex_generate_crud, apex_generate_dashboard, apex_generate_login."""
 from __future__ import annotations
 
+import logging
+
 from ..db import db
 from ..ids import ids
 from ..session import session, PageInfo, RegionInfo, ItemInfo, LovInfo
@@ -15,6 +17,8 @@ from ..templates import (
 from ..config import WORKSPACE_ID, APEX_SCHEMA
 from ..utils import _json,  _esc, _blk, _sql_to_varchar2
 from ..validators import validate_table_name
+
+_log = logging.getLogger("apex_mcp.generators")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +200,8 @@ def apex_generate_crud(
     list_page_name = list_page_name or _humanize(upper_table)
     form_page_name = form_page_name or f"Edit {list_page_name}"
 
+    _log.info("Generating CRUD for table %s (pages %d, %d)", table_name, list_page_id, form_page_id)
+
     log: list[str] = []
     items_created: list[str] = []
     lovs_created: list[str] = []
@@ -330,6 +336,7 @@ wwv_flow_imp_page.create_page(
             page_type="report",
         )
         log.append(f"List page {list_page_id} created")
+        _log.info("Created list page %d for %s", list_page_id, table_name)
 
         # ── 7. Create IR region on list page ─────────────────────────────
         # Build edit link: clicking a row opens the form page.
@@ -459,6 +466,7 @@ wwv_flow_imp_page.create_page(
             page_type="form",
         )
         log.append(f"Form page {form_page_id} created")
+        _log.info("Created form page %d for %s", form_page_id, table_name)
 
         # ── 11. Form region ───────────────────────────────────────────────
         form_region_id = ids.next(f"form_region_{form_page_id}")
@@ -691,6 +699,8 @@ wwv_flow_imp_page.create_page_da_event(
 );"""))
         log.append("Cancel DA event created")
 
+        _log.info("CRUD generation complete for %s", table_name)
+
         return _json({
             "status": "ok",
             "table": upper_table,
@@ -770,6 +780,9 @@ def apex_generate_dashboard(
         ]
 
     default_ir_sql = ir_sql or "SELECT table_name, num_rows FROM user_tables ORDER BY table_name"
+
+    _log.info("Generating dashboard page %d (%s) with %d KPI cards",
+              page_id, page_name, len(kpi_queries))
 
     try:
         # ── Create the page (skip if already created via apex_add_page) ──
@@ -889,6 +902,8 @@ wwv_flow_imp_page.create_worksheet(
 );"""))
         log.append("IR worksheet created")
 
+        _log.info("Dashboard generation complete for page %d", page_id)
+
         return _json({
             "status": "ok",
             "page_id": page_id,
@@ -975,6 +990,8 @@ def apex_generate_login(
 
     # Derive the app name to show on the login page
     effective_app_name = app_name or session.app_name or "Application"
+
+    _log.info("Generating login page %d (%s)", page_id, page_name)
 
     try:
         # ── Create login page ─────────────────────────────────────────────
@@ -1100,6 +1117,8 @@ wwv_flow_imp_page.create_page_process(
 ,p_process_when_button_id=>wwv_flow_imp.id({signin_btn_id})
 );"""))
         log.append("Authentication process created")
+
+        _log.info("Login page generation complete for page %d", page_id)
 
         return _json({
             "status": "ok",

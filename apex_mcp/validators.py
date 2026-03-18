@@ -168,3 +168,47 @@ def safe_validate(func: Callable[[Any], T], value: Any, default: T | None = None
         return func(value)
     except ValueError:
         return default
+
+
+def validate_item_name(name: str) -> str:
+    """Validate APEX item name (P{page_id}_{NAME} pattern)."""
+    if not name or not isinstance(name, str):
+        raise ValueError("Item name cannot be empty")
+    name = name.upper().strip()
+    if not re.match(r'^P\d+_[A-Z][A-Z0-9_]{0,127}$', name):
+        raise ValueError(
+            f"Invalid item name '{name}'. Must match P{{page_id}}_{{COLUMN_NAME}} "
+            f"(e.g., P10_STATUS, P1_FIRST_NAME)"
+        )
+    return name
+
+
+def validate_process_name(name: str) -> str:
+    """Validate APEX process name."""
+    if not name or not isinstance(name, str):
+        raise ValueError("Process name cannot be empty")
+    name = name.strip()
+    if len(name) > 255:
+        raise ValueError(f"Process name too long ({len(name)} chars, max 255)")
+    return name
+
+
+def validate_auth_scheme_name(name: str) -> str:
+    """Validate authorization scheme name (IS_ prefix recommended)."""
+    if not name or not isinstance(name, str):
+        raise ValueError("Authorization scheme name cannot be empty")
+    name = name.strip()
+    if len(name) > 255:
+        raise ValueError(f"Auth scheme name too long ({len(name)} chars, max 255)")
+    return name
+
+
+def validate_lov_query(sql: str) -> str:
+    """Validate LOV query has d (display) and r (return) columns."""
+    if not sql or not isinstance(sql, str):
+        raise ValueError("LOV query cannot be empty")
+    sql = sql.strip()
+    upper = sql.upper()
+    if not upper.startswith("SELECT"):
+        raise ValueError("LOV query must start with SELECT")
+    return sql

@@ -509,3 +509,170 @@ def apex_fix_permissions() -> str:
         "grant_script": grant_script,
         "summary": summary,
     })
+
+
+def apex_refresh_templates() -> str:
+    """Refresh APEX template IDs from the live database.
+
+    Queries the database to discover current template IDs for Universal Theme 42.
+    Useful after APEX upgrades or when connecting to a different workspace.
+    Requires an active database connection.
+
+    Returns:
+        JSON with discovered template IDs and comparison with previous values.
+    """
+    from ..db import db
+    from ..templates import discover_template_ids, PAGE_TMPL_STANDARD
+
+    if not db.is_connected():
+        return _json({"status": "error", "error": "Not connected. Call apex_connect() first."})
+
+    old_page_tmpl = PAGE_TMPL_STANDARD
+
+    try:
+        discovered = discover_template_ids(db)
+        from .. import templates
+        changed = old_page_tmpl != templates.PAGE_TMPL_STANDARD
+        return _json({
+            "status": "ok",
+            "discovered": discovered,
+            "changed": changed,
+            "message": "Template IDs refreshed from database" + (" (values changed)" if changed else " (no changes)"),
+        })
+    except Exception as e:
+        return _json({"status": "error", "error": str(e)})
+
+
+def apex_health_check() -> str:
+    """Run comprehensive health check on the apex-mcp environment.
+
+    Checks: database connectivity and latency, APEX workspace access,
+    template ID validity, session state, and recent errors.
+
+    Returns:
+        JSON with overall status (pass/warn/fail), individual check results,
+        and recommendations.
+    """
+    from ..db import db
+    from ..session import session
+    from ..config import APEX_SCHEMA, WORKSPACE_NAME, WORKSPACE_ID, APEX_VERSION
+    from ..templates import PAGE_TMPL_STANDARD
+    import time
+
+    checks = []
+    overall = "pass"
+
+    # 1. Database connectivity + latency
+    try:
+        t0 = time.time()
+        if db.is_connected():
+            db.execute("SELECT 1 FROM DUAL")
+            latency = round((time.time() - t0) * 1000)
+            checks.append({
+                "check": "database_connection",
+                "status": "pass" if latency < 500 else "warn",
+                "detail": f"Connected, latency {latency}ms",
+            })
+            if latency >= 500:
+                overall = "warn"
+        else:
+            checks.append({
+                "check": "database_connection",
+                "status": "fail",
+                "detail": "Not connected. Call apex_connect() first.",
+            })
+            overall = "fail"
+    except Exception as e:
+        checks.append({"check": "database_connection", "status": "fail", "detail": str(e)})
+        overall = "fail"
+
+    # 2. APEX workspace access
+    if db.is_connected():
+        try:
+            rows = db.execute(
+                "SELECT COUNT(*) CNT FROM apex_applications WHERE workspace = :ws",
+                {"ws": WORKSPACE_NAME}
+            )
+            cnt = rows[0]["CNT"] if rows else 0
+            checks.append({
+                "check": "apex_workspace",
+                "status": "pass",
+                "detail": f"Workspace '{WORKSPACE_NAME}' accessible, {cnt} apps found",
+            })
+        except Exception as e:
+            checks.append({"check": "apex_workspace", "status": "fail", "detail": str(e)})
+            overall = "fail"
+
+    # 3. Template IDs validity
+    if PAGE_TMPL_STANDARD and PAGE_TMPL_STANDARD > 0:
+        checks.append({
+            "check": "template_ids",
+            "status": "pass",
+            "detail": f"PAGE_TMPL_STANDARD = {PAGE_TMPL_STANDARD}",
+        })
+    else:
+        checks.append({
+            "check": "template_ids",
+            "status": "warn",
+            "detail": "Template IDs not discovered. Call apex_connect() to auto-discover.",
+        })
+        if overall == "pass":
+            overall = "warn"
+
+    # 4. Session state
+    if session.import_begun and not session.import_ended:
+        checks.append({
+            "check": "session_state",
+            "status": "pass",
+            "detail": f"Active session: app {session.app_id}, {len(session.pages)} pages",
+        })
+    elif session.import_ended:
+        checks.append({
+            "check": "session_state",
+            "status": "pass",
+            "detail": f"Session finalized for app {session.app_id}",
+        })
+    else:
+        checks.append({
+            "check": "session_state",
+            "status": "pass",
+            "detail": "No active session (ready to create app)",
+        })
+
+    # 5. Configuration completeness
+    missing = []
+    if not APEX_SCHEMA:
+        missing.append("APEX_SCHEMA")
+    if not WORKSPACE_NAME:
+        missing.append("APEX_WORKSPACE_NAME")
+    if not WORKSPACE_ID:
+        missing.append("APEX_WORKSPACE_ID")
+    if missing:
+        checks.append({
+            "check": "configuration",
+            "status": "fail",
+            "detail": f"Missing env vars: {', '.join(missing)}",
+        })
+        overall = "fail"
+    else:
+        checks.append({
+            "check": "configuration",
+            "status": "pass",
+            "detail": f"All required env vars set (APEX {APEX_VERSION})",
+        })
+
+    return _json({"status": overall, "checks": checks})
+
+
+def apex_get_audit_log(limit: int = 50) -> str:
+    """Return recent audit log entries for debugging and compliance.
+
+    Args:
+        limit: Maximum number of entries to return (newest first). Default 50.
+
+    Returns:
+        JSON with recent audit entries including timestamps, tool names, status, and duration.
+    """
+    from ..audit import audit
+    entries = audit.recent(limit=limit)
+    return _json({"status": "ok", "entries": entries, "count": len(entries)})

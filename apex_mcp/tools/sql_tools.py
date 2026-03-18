@@ -100,9 +100,7 @@ def apex_run_sql(sql: str, max_rows: int = 100, bind_params: dict | None = None)
     if is_select:
         try:
             max_rows = min(max_rows, 1000)
-            rows = db.execute(sql, bind_params or {})
-            if len(rows) > max_rows:
-                rows = rows[:max_rows]
+            rows = db.execute_safe(sql, bind_params or {}, max_rows=max_rows)
             return _json({"status": "ok", "rows": rows, "count": len(rows)})
         except Exception as e:
             return _json({"status": "error", "error": str(e)})

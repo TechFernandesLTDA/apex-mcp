@@ -734,3 +734,71 @@ def apex_dry_run_preview(enabled: bool = True) -> str:
             "plsql_log": log,
             "message": f"Dry-run mode OFF. {len(log)} PL/SQL statement(s) were captured (not executed).",
         })
+
+
+def apex_undo_last(steps: int = 1) -> str:
+    """Undo the last N component creations by deleting them in reverse order.
+
+    Only works during an active import session (between apex_create_app and
+    apex_finalize_app). Uses the session's component tracking log to identify
+    what was created and deletes them in reverse.
+
+    Args:
+        steps: Number of components to undo. Default 1 (last component).
+
+    Returns:
+        JSON with status, list of undone components, and remaining component count.
+    """
+    from ..session import session
+    from ..db import db
+
+    if not session.import_begun:
+        return _json({"status": "error", "error": "No active session. Nothing to undo."})
+    if session.import_ended:
+        return _json({"status": "error", "error": "Session already finalized. Cannot undo."})
+
+    # Get the last N created components
+    log = session._created_components
+    if not log:
+        return _json({"status": "error", "error": "No tracked components to undo."})
+
+    steps = min(steps, len(log))
+    undone = []
+
+    for _ in range(steps):
+        comp_type, comp_id = log.pop()  # Remove from end (LIFO)
+        try:
+            # Delete via APEX internal API
+            if comp_type == "region":
+                db.plsql(f"BEGIN wwv_flow_imp_page.remove_page_plug(p_id => {comp_id}); END;")
+                # Also remove from session tracking
+                session.regions.pop(comp_id, None)
+            elif comp_type == "item":
+                db.plsql(f"BEGIN wwv_flow_imp_page.remove_page_item(p_id => {comp_id}); END;")
+                # Remove from items dict by scanning for matching ID
+                session.items = {k: v for k, v in session.items.items() if v.item_id != comp_id}
+            elif comp_type == "button":
+                db.plsql(f"BEGIN wwv_flow_imp_page.remove_page_button(p_id => {comp_id}); END;")
+                session.buttons = {k: v for k, v in session.buttons.items() if v != comp_id}
+            elif comp_type == "process":
+                db.plsql(f"BEGIN wwv_flow_imp_page.remove_page_process(p_id => {comp_id}); END;")
+                session.processes.pop(comp_id, None)
+            elif comp_type == "page":
+                db.plsql(f"BEGIN wwv_flow_api.remove_page(p_flow_id => {session.app_id}, p_page_id => {comp_id}); END;")
+                session.pages.pop(comp_id, None)
+            elif comp_type == "dynamic_action":
+                db.plsql(f"BEGIN wwv_flow_imp_page.remove_page_da_event(p_id => {comp_id}); END;")
+                session.dynamic_actions.pop(comp_id, None)
+            else:
+                undone.append({"type": comp_type, "id": comp_id, "status": "skipped", "reason": "unknown type"})
+                continue
+
+            undone.append({"type": comp_type, "id": comp_id, "status": "deleted"})
+        except Exception as e:
+            undone.append({"type": comp_type, "id": comp_id, "status": "error", "error": str(e)})
+
+    return _json({
+        "status": "ok",
+        "undone": undone,
+        "remaining_tracked": len(log),
+    })
