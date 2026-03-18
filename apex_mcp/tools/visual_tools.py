@@ -4,6 +4,7 @@ import json
 from typing import Any
 from ..db import db
 from ..ids import ids
+from ..palette import resolve_color, resolve_palette, COLORS
 from ..session import session, PageInfo, RegionInfo, ChartInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK, REGION_TMPL_CARDS
 from ..utils import _json,  _esc, _blk, _sql_to_varchar2
@@ -612,11 +613,7 @@ def apex_add_sparkline(
     if page_id not in session.pages:
         return _json({"status": "error", "error": f"Page {page_id} not found."})
 
-    named_colors = {
-        "blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
-        "red": "#e53935", "purple": "#8e24aa", "teal": "#00897b",
-        "indigo": "#3949ab", "amber": "#ffb300",
-    }
+    named_colors = COLORS
     col_pct = {2: "48%", 3: "31%", 4: "23%"}.get(columns, "23%")
 
     try:
@@ -799,11 +796,7 @@ def apex_add_metric_cards(
         "indigo": ("linear-gradient(135deg,#3949ab,#1a237e)", "#fff"),
         "amber":  ("linear-gradient(135deg,#ffb300,#ff6f00)", "#fff"),
     }
-    white_border_map = {
-        "blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
-        "red": "#e53935", "purple": "#8e24aa", "teal": "#00897b",
-        "indigo": "#3949ab", "amber": "#ffb300",
-    }
+    white_border_map = COLORS
     dark_map = {
         "blue": "#60a5fa", "green": "#34d399", "orange": "#fb923c",
         "red": "#f87171", "purple": "#c084fc", "teal": "#2dd4bf",
@@ -897,7 +890,7 @@ def apex_add_metric_cards(
                 card_style = f"background:{bg};color:{text_color};"
                 icon_style = f"color:{text_color};"
             elif style == "white":
-                accent = white_border_map.get(color, "#1e88e5")
+                accent = white_border_map.get(color, resolve_color(color))
                 card_style = f"border-left-color:{accent};"
                 icon_style = f"color:{accent};"
             else:

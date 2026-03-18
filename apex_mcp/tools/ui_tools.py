@@ -4,25 +4,31 @@ All tools render HTML via NATIVE_PLSQL regions using sys.htp.p().
 No external JS libraries required — works with Universal Theme 42 / APEX 24.2.
 """
 from __future__ import annotations
+
+import html as _html_mod
 from typing import Any
+
 from ..db import db
 from ..ids import ids
 from ..session import session, RegionInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK
 from ..utils import _json, _esc, _blk, _sql_to_varchar2
 
-_COLORS: dict[str, str] = {
-    "blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
-    "red": "#e53935", "purple": "#8e24aa", "teal": "#00897b",
-    "indigo": "#3949ab", "amber": "#ffb300", "pink": "#e91e63",
-    "cyan": "#00bcd4", "lime": "#8bc34a", "brown": "#795548",
-    "unimed": "#00995d", "navy": "#1a237e", "slate": "#546e7a",
-    "gold": "#f9a825", "rose": "#c2185b",
-}
+from ..palette import COLORS, resolve_color, resolve_palette  # noqa: F401
 
 
 def _col(color: str) -> str:
-    return _COLORS.get(color.lower(), color)
+    """Resolve a named or hex color via the palette module."""
+    return resolve_color(color)
+
+
+def _html_esc(text: str) -> str:
+    """Escape user-provided text for safe embedding in HTML output.
+
+    Converts &, <, >, and quotes to HTML entities so that user text
+    cannot break the generated HTML structure.
+    """
+    return _html_mod.escape(str(text), quote=True)
 
 
 def _guard(page_id: int) -> str | None:
@@ -62,6 +68,9 @@ def apex_add_hero_banner(
     bg_color: str = "unimed",
     button_label: str = "",
     button_url: str = "",
+    title_size: str = "1.7rem",
+    subtitle_size: str = "1rem",
+    custom_css: str = "",
     sequence: int = 5,
 ) -> str:
     """Add a full-width hero banner to a page.
@@ -78,6 +87,9 @@ def apex_add_hero_banner(
         bg_color: Background color — named ("unimed","blue","teal") or hex ("#00995D").
         button_label: Optional CTA button label (e.g., "New Record").
         button_url: URL or f?p= reference for CTA button.
+        title_size: CSS font-size for the title (default "1.7rem").
+        subtitle_size: CSS font-size for the subtitle (default "1rem").
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -92,9 +104,9 @@ def apex_add_hero_banner(
 
     stat_lines: list[str] = []
     for s in (stats or []):
-        lbl = _esc(s.get("label", ""))
+        lbl = _esc(_html_esc(s.get("label", "")))
         sql = _esc(s.get("sql", "SELECT '' FROM DUAL"))
-        sfx = _esc(s.get("suffix", ""))
+        sfx = _esc(_html_esc(s.get("suffix", "")))
         stat_lines.append(f"""
   BEGIN EXECUTE IMMEDIATE '{sql}' INTO v_val;
   EXCEPTION WHEN OTHERS THEN v_val := '-'; END;
@@ -103,32 +115,41 @@ def apex_add_hero_banner(
 
     btn_html = ""
     if button_label and button_url:
-        btn_html = (f'<a href=\\"{_esc(button_url)}\\" class="mcp-hero-btn">'
-                    f'{_esc(button_label)}</a>')
+        btn_html = (f'<a href=\\"{_esc(_html_esc(button_url))}\\" class="mcp-hero-btn">'
+                    f'{_esc(_html_esc(button_label))}</a>')
 
     stats_block = "".join(stat_lines)
     has_stats = bool(stats)
     stats_open = "  sys.htp.p('<div class=\"mcp-hero-stats\">'); " if has_stats else ""
     stats_close = "  sys.htp.p('</div>'); " if has_stats else ""
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE v_val VARCHAR2(4000);
 BEGIN
   sys.htp.p('<style>
     .mcp-hero{{background:linear-gradient(135deg,{color} 0%,{color}cc 100%);
       color:#fff;padding:28px 32px;border-radius:12px;margin-bottom:16px;}}
-    .mcp-hero h2{{margin:0 0 6px;font-size:1.7rem;font-weight:700;}}
-    .mcp-hero-sub{{opacity:.85;font-size:1rem;margin-bottom:16px;}}
+    .mcp-hero h2{{margin:0 0 6px;font-size:{_esc(title_size)};font-weight:700;color:#fff;}}
+    .mcp-hero-sub{{opacity:.85;font-size:{_esc(subtitle_size)};margin-bottom:16px;color:#fff;}}
     .mcp-hero-stats{{display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;}}
-    .mcp-hero-stat{{background:rgba(255,255,255,.18);border-radius:8px;padding:10px 18px;min-width:90px;text-align:center;}}
-    .mcp-hero-stat-val{{font-size:1.5rem;font-weight:700;}}
-    .mcp-hero-stat-lbl{{font-size:.75rem;opacity:.85;text-transform:uppercase;letter-spacing:.5px;}}
+    .mcp-hero-stat{{background:rgba(255,255,255,.18);border-radius:8px;padding:10px 18px;
+      min-width:90px;text-align:center;flex:1 1 auto;}}
+    .mcp-hero-stat-val{{font-size:1.5rem;font-weight:700;color:#fff;}}
+    .mcp-hero-stat-lbl{{font-size:.75rem;opacity:.85;text-transform:uppercase;letter-spacing:.5px;color:#fff;}}
     .mcp-hero-btn{{display:inline-block;background:#fff;color:{color};padding:9px 22px;
       border-radius:20px;font-weight:600;text-decoration:none;margin-top:14px;
       transition:opacity .2s;}}.mcp-hero-btn:hover{{opacity:.85;}}
+    @media(max-width:600px){{
+      .mcp-hero{{padding:20px 16px;}}
+      .mcp-hero h2{{font-size:1.3rem;}}
+      .mcp-hero-stats{{gap:12px;}}
+      .mcp-hero-stat{{min-width:70px;padding:8px 12px;}}
+    }}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-hero">');
-  sys.htp.p('<h2>{_esc(title)}</h2>');
-  sys.htp.p('<div class="mcp-hero-sub">{_esc(subtitle)}</div>');
+  sys.htp.p('<h2>{_esc(_html_esc(title))}</h2>');
+  sys.htp.p('<div class="mcp-hero-sub">{_esc(_html_esc(subtitle))}</div>');
   {stats_open}
   {stats_block}
   {stats_close}
@@ -154,6 +175,8 @@ def apex_add_kpi_row(
     page_id: int,
     region_name: str,
     metrics: list[dict[str, str]],
+    value_size: str = "1.4rem",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a compact horizontal KPI row with colored values and labels.
@@ -169,6 +192,8 @@ def apex_add_kpi_row(
             - "sql": SQL returning a single scalar value
             - "suffix": Optional unit suffix ("%" , " dias", etc.)
             - "color": Accent color for the value text
+        value_size: CSS font-size for metric values (default "1.4rem").
+        custom_css: Additional CSS rules injected into the style block.
 
     Returns:
         JSON with status, region_id.
@@ -178,23 +203,29 @@ def apex_add_kpi_row(
         return err
 
     region_id = ids.next(f"kpirow_{page_id}_{_esc(region_name)}")
+    extra_css = _esc(custom_css) if custom_css else ""
     lines: list[str] = [
         "DECLARE v_val VARCHAR2(4000);",
         "BEGIN",
         "  sys.htp.p('<style>"
-        ".mcp-kpi-row{display:flex;gap:0;background:#fff;border-radius:10px;"
+        ".mcp-kpi-row{display:flex;flex-wrap:wrap;gap:0;background:#fff;border-radius:10px;"
         "box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;margin-bottom:12px;}"
-        ".mcp-kpi-cell{flex:1;padding:14px 20px;text-align:center;border-right:1px solid #f0f0f0;}"
+        ".mcp-kpi-cell{flex:1 1 auto;padding:14px 20px;text-align:center;border-right:1px solid #f0f0f0;min-width:100px;}"
         ".mcp-kpi-cell:last-child{border-right:none;}"
-        ".mcp-kpi-val{font-size:1.4rem;font-weight:700;}"
+        f".mcp-kpi-val{{font-size:{_esc(value_size)};font-weight:700;}}"
         ".mcp-kpi-lbl{font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-top:3px;}"
+        "@media(max-width:600px){"
+        ".mcp-kpi-row{flex-direction:column;}"
+        ".mcp-kpi-cell{border-right:none;border-bottom:1px solid #f0f0f0;padding:10px 16px;}"
+        ".mcp-kpi-cell:last-child{border-bottom:none;}}"
+        f"{extra_css}"
         "</style>');",
         "  sys.htp.p('<div class=\"mcp-kpi-row\">');",
     ]
     for m in metrics:
-        lbl = _esc(m.get("label", ""))
+        lbl = _esc(_html_esc(m.get("label", "")))
         sql = _esc(m.get("sql", "SELECT '' FROM DUAL"))
-        sfx = _esc(m.get("suffix", ""))
+        sfx = _esc(_html_esc(m.get("suffix", "")))
         clr = _col(m.get("color", "blue"))
         lines.append(f"""
   BEGIN EXECUTE IMMEDIATE '{sql}' INTO v_val;
@@ -226,6 +257,8 @@ def apex_add_progress_tracker(
     steps: list[str],
     current_step: int = 1,
     color: str = "unimed",
+    completed_label: str = "",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a horizontal step-by-step progress tracker.
@@ -236,9 +269,11 @@ def apex_add_progress_tracker(
     Args:
         page_id: Target page ID.
         region_name: Internal region name.
-        steps: List of step labels (e.g., ["Dados Básicos","Clínica","Confirmação"]).
+        steps: List of step labels (e.g., ["Dados Basicos","Clinica","Confirmacao"]).
         current_step: Active step number (1-based).
         color: Accent color for active/completed steps.
+        completed_label: Override the checkmark character for completed steps.
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -251,9 +286,11 @@ def apex_add_progress_tracker(
     region_id = ids.next(f"progress_{page_id}_{_esc(region_name)}")
     clr = _col(color)
     active = max(1, min(current_step, len(steps)))
+    extra_css = _esc(custom_css) if custom_css else ""
 
     step_html_parts: list[str] = []
     for i, label in enumerate(steps, start=1):
+        safe_label = _html_esc(label)
         if i < active:
             cls, style = "mcp-step done", f"background:{clr};color:#fff;border-color:{clr};"
         elif i == active:
@@ -264,21 +301,28 @@ def apex_add_progress_tracker(
         step_html_parts.append(
             f'<div class="mcp-step-wrap">'
             f'<div class="{cls}" style="{style}">{i}</div>'
-            f'<div class="mcp-step-label">{_esc(label)}</div>'
+            f'<div class="mcp-step-label">{_esc(safe_label)}</div>'
             f'</div>{connector}'
         )
 
+    check_content = _esc(_html_esc(completed_label)) if completed_label else "\\2713"
     steps_html = _esc("".join(step_html_parts))
     plsql = f"""BEGIN
   sys.htp.p('<style>
-    .mcp-progress{{display:flex;align-items:flex-start;justify-content:center;padding:14px 0;}}
-    .mcp-step-wrap{{display:flex;flex-direction:column;align-items:center;flex:1;}}
+    .mcp-progress{{display:flex;align-items:flex-start;justify-content:center;padding:14px 0;flex-wrap:wrap;}}
+    .mcp-step-wrap{{display:flex;flex-direction:column;align-items:center;flex:1;min-width:60px;}}
     .mcp-step{{width:32px;height:32px;border-radius:50%;border:2px solid #ddd;
       display:flex;align-items:center;justify-content:center;font-weight:700;
       font-size:.85rem;transition:all .3s;}}
-    .mcp-step.done::after{{content:"✓";}}
+    .mcp-step.done::after{{content:"{check_content}";}}
     .mcp-step-label{{font-size:.72rem;color:#666;margin-top:5px;text-align:center;max-width:80px;}}
     .mcp-step-line{{flex:1;height:2px;background:#e0e0e0;margin:15px -2px 0;min-width:20px;}}
+    @media(max-width:480px){{
+      .mcp-progress{{gap:4px;}}
+      .mcp-step-label{{font-size:.65rem;max-width:60px;}}
+      .mcp-step-line{{min-width:10px;}}
+    }}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-progress">{steps_html}</div>');
 END;"""
@@ -304,6 +348,7 @@ def apex_add_alert_box(
     title: str = "",
     dismissible: bool = True,
     icon: str = "",
+    custom_css: str = "",
     sequence: int = 5,
 ) -> str:
     """Add a styled alert/info/warning/error box to a page.
@@ -316,8 +361,9 @@ def apex_add_alert_box(
         message: Alert message text. Supports &ITEM. substitutions.
         alert_type: "info" | "success" | "warning" | "error".
         title: Optional bold title line above the message.
-        dismissible: Show × close button (default True).
+        dismissible: Show x close button (default True).
         icon: Font Awesome class override (e.g., "fa-bell"). Uses type default if empty.
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -327,6 +373,8 @@ def apex_add_alert_box(
     if err:
         return err
 
+    # Text color, background, border color, default icon
+    # All combos maintain WCAG AA contrast (4.5:1+)
     TYPE_MAP = {
         "info":    ("#1565c0", "#e3f2fd", "#90caf9", "fa-info-circle"),
         "success": ("#1b5e20", "#e8f5e9", "#a5d6a7", "fa-check-circle"),
@@ -340,16 +388,22 @@ def apex_add_alert_box(
         f'style="float:right;background:none;border:none;cursor:pointer;'
         f'color:{txt};font-size:1.1rem;line-height:1;">&times;</button>'
     ) if dismissible else ""
-    title_html = f'<strong style="display:block;margin-bottom:4px;">{_esc(title)}</strong>' if title else ""
+    safe_title = _html_esc(title)
+    title_html = f'<strong style="display:block;margin-bottom:4px;">{_esc(safe_title)}</strong>' if title else ""
     region_id = ids.next(f"alert_{page_id}_{alert_type}")
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""BEGIN
+  sys.htp.p('<style>
+    .mcp-alert{{border-radius:8px;padding:14px 18px;margin-bottom:14px;}}
+    {extra_css}
+  </style>');
   sys.htp.p('<div class="mcp-alert" style="background:{bg};border-left:4px solid {border};'||
-            'border-radius:8px;padding:14px 18px;margin-bottom:14px;color:{txt};">');
+            'color:{txt};">');
   sys.htp.p('{_esc(dismiss)}');
   sys.htp.p('<span class="fa {fa}" style="margin-right:8px;"></span>');
   sys.htp.p('{_esc(title_html)}');
-  sys.htp.p('{_esc(message)}');
+  sys.htp.p('{_esc(_html_esc(message))}');
   sys.htp.p('</div>');
 END;"""
 
@@ -373,11 +427,13 @@ def apex_add_stat_delta(
     region_name: str,
     metrics: list[dict[str, Any]],
     columns: int = 4,
+    delta_label: str = "vs anterior",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add metric cards with current value and a delta (change vs previous period).
 
-    Each card shows: icon, label, current value, delta arrow (▲▼) with % change.
+    Each card shows: icon, label, current value, delta arrow with % change.
 
     Args:
         page_id: Target page ID.
@@ -390,7 +446,9 @@ def apex_add_stat_delta(
             - "color": Accent color
             - "suffix": Unit suffix ("%", " pacientes", etc.)
             - "prefix": Unit prefix ("R$ ", "$", etc.)
-        columns: Number of columns (2–4).
+        columns: Number of columns (2-4).
+        delta_label: Label text after the percentage change (default "vs anterior").
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -402,6 +460,8 @@ def apex_add_stat_delta(
 
     region_id = ids.next(f"delta_{page_id}_{_esc(region_name)}")
     col_pct = {2: "48%", 3: "31%", 4: "23%"}.get(columns, "23%")
+    extra_css = _esc(custom_css) if custom_css else ""
+    safe_delta_lbl = _esc(_html_esc(delta_label))
 
     lines = [
         "DECLARE",
@@ -421,18 +481,20 @@ def apex_add_stat_delta(
         f".mcp-delta-label{{font-size:.75rem;color:#888;text-transform:uppercase;letter-spacing:.4px;}}"
         f".mcp-delta-val{{font-size:1.6rem;font-weight:700;color:#333;}}"
         f".mcp-delta-change{{font-size:.78rem;margin-top:4px;font-weight:600;}}"
+        f"@media(max-width:600px){{.mcp-delta-card{{flex:1 1 100%;min-width:0;}}}}"
+        f"{extra_css}"
         f"</style>');",
         "  sys.htp.p('<div class=\"mcp-delta-grid\">');",
     ]
 
     for m in metrics:
-        lbl  = _esc(m.get("label", ""))
+        lbl  = _esc(_html_esc(m.get("label", "")))
         sql  = _esc(m.get("sql", "SELECT 0 FROM DUAL"))
         psql = _esc(m.get("prev_sql", "SELECT 0 FROM DUAL"))
         ico  = m.get("icon", "fa-chart-bar")
         clr  = _col(m.get("color", "blue"))
-        sfx  = _esc(m.get("suffix", ""))
-        pfx  = _esc(m.get("prefix", ""))
+        sfx  = _esc(_html_esc(m.get("suffix", "")))
+        pfx  = _esc(_html_esc(m.get("prefix", "")))
         lines.append(f"""
   BEGIN EXECUTE IMMEDIATE '{sql}'  INTO v_cur;  EXCEPTION WHEN OTHERS THEN v_cur  := 0; END;
   BEGIN EXECUTE IMMEDIATE '{psql}' INTO v_prev; EXCEPTION WHEN OTHERS THEN v_prev := 0; END;
@@ -444,7 +506,7 @@ def apex_add_stat_delta(
   IF v_delta > 0 THEN v_arrow := '&#9650;'; v_delta_color := '#43a047';
   ELSIF v_delta < 0 THEN v_arrow := '&#9660;'; v_delta_color := '#e53935';
   ELSE v_arrow := '&#8213;'; v_delta_color := '#9e9e9e'; END IF;
-  v_delta_str := v_arrow || ' ' || TO_CHAR(ABS(v_delta)) || '% vs anterior';
+  v_delta_str := v_arrow || ' ' || TO_CHAR(ABS(v_delta)) || '% {safe_delta_lbl}';
   sys.htp.p('<div class="mcp-delta-card" style="border-top:3px solid {clr}">');
   sys.htp.p('<div class="mcp-delta-top">');
   sys.htp.p('<span class="fa {ico} mcp-delta-icon" style="color:{clr}"></span>');
@@ -476,22 +538,24 @@ def apex_add_quick_links(
     region_name: str,
     links: list[dict[str, str]],
     columns: int = 4,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a grid of quick-action icon buttons to a page.
 
-    Ideal for dashboard homepages — a visually rich navigation shortcut panel.
+    Ideal for dashboard homepages -- a visually rich navigation shortcut panel.
 
     Args:
         page_id: Target page ID.
         region_name: Internal region name.
-        links: List of link dicts (4–8 recommended):
+        links: List of link dicts (4-8 recommended):
             - "label": Button label
             - "url": Target URL or f?p= link
             - "icon": Font Awesome class (e.g., "fa-plus", "fa-users")
             - "color": Accent/background color
             - "badge": Optional badge/count (from SQL or static text)
-        columns: Number of columns (2–5, default 4).
+        columns: Number of columns (2-5, default 4).
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -503,14 +567,15 @@ def apex_add_quick_links(
 
     region_id = ids.next(f"quicklinks_{page_id}_{_esc(region_name)}")
     col_pct = {2: "48%", 3: "31%", 4: "23%", 5: "18%"}.get(columns, "23%")
+    extra_css = _esc(custom_css) if custom_css else ""
 
     html_parts: list[str] = []
     for lk in links:
-        lbl  = _esc(lk.get("label", "Link"))
-        url  = _esc(lk.get("url", "#"))
+        lbl  = _esc(_html_esc(lk.get("label", "Link")))
+        url  = _esc(_html_esc(lk.get("url", "#")))
         ico  = lk.get("icon", "fa-link")
         clr  = _col(lk.get("color", "blue"))
-        badge = _esc(lk.get("badge", ""))
+        badge = _esc(_html_esc(lk.get("badge", "")))
         bdg = f'<span class="mcp-ql-badge">{badge}</span>' if badge else ""
         html_parts.append(
             f'<a href="{url}" class="mcp-ql-btn" style="border-top:3px solid {clr};">'
@@ -532,6 +597,11 @@ def apex_add_quick_links(
     .mcp-ql-label{{font-size:.8rem;font-weight:600;color:#555;text-align:center;}}
     .mcp-ql-badge{{position:absolute;top:8px;right:10px;background:#e53935;color:#fff;
       border-radius:10px;padding:1px 6px;font-size:.7rem;font-weight:700;}}
+    @media(max-width:480px){{
+      .mcp-ql-btn{{flex:1 1 45%;min-width:100px;padding:14px 8px;}}
+      .mcp-ql-icon{{font-size:1.3rem;}}
+    }}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-ql-grid">{all_html}</div>');
 END;"""
@@ -559,11 +629,12 @@ def apex_add_leaderboard(
     max_rows: int = 10,
     color: str = "unimed",
     show_medals: bool = True,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a ranked leaderboard list from SQL.
 
-    Displays top-N items with rank position, optional medal icons (🥇🥈🥉),
+    Displays top-N items with rank position, optional medal icons,
     a proportional progress bar, and the value.
 
     Args:
@@ -578,7 +649,8 @@ def apex_add_leaderboard(
         value_column: Column name for the numeric value (default "VALUE").
         max_rows: Maximum rows to display (default 10).
         color: Accent color for progress bars.
-        show_medals: Show 🥇🥈🥉 for top 3 (default True).
+        show_medals: Show medal icons for top 3 (default True).
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -592,6 +664,7 @@ def apex_add_leaderboard(
     clr = _col(color)
     lbl_col = label_column.upper()
     val_col = value_column.upper()
+    extra_css = _esc(custom_css) if custom_css else ""
 
     medals = "CASE WHEN v_rank = 1 THEN '&#127949;' WHEN v_rank = 2 THEN '&#127950;' WHEN v_rank = 3 THEN '&#127951;' ELSE TO_CHAR(v_rank) END" if show_medals else "TO_CHAR(v_rank)"
 
@@ -604,16 +677,18 @@ BEGIN
   sys.htp.p('<style>
     .mcp-lb{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;}}
     .mcp-lb-hdr{{background:{clr};color:#fff;padding:12px 16px;font-weight:700;font-size:.9rem;}}
-    .mcp-lb-row{{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #f5f5f5;}}
+    .mcp-lb-row{{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #f5f5f5;flex-wrap:nowrap;}}
     .mcp-lb-row:last-child{{border-bottom:none;}}
     .mcp-lb-rank{{min-width:28px;font-size:.85rem;font-weight:700;text-align:center;}}
-    .mcp-lb-name{{flex:1;font-size:.88rem;color:#333;}}
-    .mcp-lb-bar-wrap{{width:90px;background:#f0f0f0;border-radius:4px;height:6px;}}
+    .mcp-lb-name{{flex:1;font-size:.88rem;color:#333;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+    .mcp-lb-bar-wrap{{width:90px;background:#f0f0f0;border-radius:4px;height:6px;flex-shrink:0;}}
     .mcp-lb-bar{{height:6px;border-radius:4px;background:{clr};}}
     .mcp-lb-val{{min-width:40px;text-align:right;font-weight:700;font-size:.88rem;color:{clr};}}
+    @media(max-width:480px){{.mcp-lb-bar-wrap{{display:none;}}}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-lb">');
-  sys.htp.p('<div class="mcp-lb-hdr">{_esc(region_name)}</div>');
+  sys.htp.p('<div class="mcp-lb-hdr">{_esc(_html_esc(region_name))}</div>');
   BEGIN
     EXECUTE IMMEDIATE 'SELECT NVL(MAX({val_col}),1) FROM ({_esc(sql_query)})' INTO v_max;
     IF v_max = 0 THEN v_max := 1; END IF;
@@ -652,6 +727,7 @@ def apex_add_tag_cloud(
     sql_query: str,
     label_column: str = "LABEL",
     count_column: str = "CNT",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a dynamic tag cloud from SQL.
@@ -667,6 +743,7 @@ def apex_add_tag_cloud(
                         FROM TEA_AVALIACOES GROUP BY DS_STATUS ORDER BY 2 DESC"
         label_column: Column name for the tag text.
         count_column: Column name for the frequency/count.
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -679,8 +756,12 @@ def apex_add_tag_cloud(
     region_id = ids.next(f"tagcloud_{page_id}_{_esc(region_name)}")
     lbl = label_column.upper()
     cnt = count_column.upper()
-    palette = ["#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00897b",
-               "#e53935", "#3949ab", "#ffb300", "#00bcd4", "#795548"]
+    extra_css = _esc(custom_css) if custom_css else ""
+    palette = resolve_palette("default", size=10)
+
+    pal_assignments = "; ".join(
+        f"v_pal({i + 1}):='{c}'" for i, c in enumerate(palette)
+    )
 
     plsql = f"""DECLARE
   v_max   NUMBER := 1;
@@ -689,14 +770,13 @@ def apex_add_tag_cloud(
   TYPE t_colors IS TABLE OF VARCHAR2(20) INDEX BY PLS_INTEGER;
   v_pal   t_colors;
 BEGIN
-  v_pal(1):='#1e88e5'; v_pal(2):='#43a047'; v_pal(3):='#fb8c00'; v_pal(4):='#8e24aa';
-  v_pal(5):='#00897b'; v_pal(6):='#e53935'; v_pal(7):='#3949ab'; v_pal(8):='#ffb300';
-  v_pal(9):='#00bcd4'; v_pal(10):='#795548';
+  {pal_assignments};
   sys.htp.p('<style>
     .mcp-tagcloud{{display:flex;flex-wrap:wrap;gap:8px;padding:12px 4px;align-items:center;}}
     .mcp-tag{{display:inline-block;padding:4px 12px;border-radius:20px;color:#fff;
       font-weight:600;cursor:default;transition:opacity .2s;opacity:.9;}}
     .mcp-tag:hover{{opacity:1;box-shadow:0 2px 8px rgba(0,0,0,.2);}}
+    {extra_css}
   </style>');
   BEGIN
     EXECUTE IMMEDIATE 'SELECT NVL(MAX({cnt}),1) FROM ({_esc(sql_query)})' INTO v_max;
@@ -736,6 +816,7 @@ def apex_add_percent_bars(
     value_column: str = "VALUE",
     color: str = "unimed",
     show_values: bool = True,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add horizontal percentage bar chart rendered in HTML.
@@ -766,6 +847,7 @@ def apex_add_percent_bars(
     clr = _col(color)
     lbl = label_column.upper()
     val = value_column.upper()
+    extra_css = _esc(custom_css) if custom_css else ""
     val_display = "sys.htp.p('<span class=\"mcp-pb-val\">' || TO_CHAR(r.{val}) || '</span>');" if show_values else ""
 
     plsql = f"""DECLARE
@@ -780,6 +862,7 @@ BEGIN
     .mcp-pb-track{{background:#f0f0f0;border-radius:6px;height:10px;overflow:hidden;}}
     .mcp-pb-fill{{height:10px;border-radius:6px;background:{clr};transition:width .5s ease;}}
     .mcp-pb-val{{font-size:.8rem;color:{clr};font-weight:700;}}
+    {extra_css}
   </style>');
   BEGIN
     EXECUTE IMMEDIATE 'SELECT NVL(MAX({val}),1) FROM ({_esc(sql_query)})' INTO v_max;
@@ -822,6 +905,7 @@ def apex_add_icon_list(
     icon_column: str = "",
     default_icon: str = "fa-circle",
     color: str = "blue",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a vertical icon+label+value list from SQL.
@@ -854,11 +938,12 @@ def apex_add_icon_list(
     lbl = label_column.upper()
     val = value_column.upper()
     ico_expr = f"r.{icon_column.upper()}" if icon_column else f"'{default_icon}'"
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE v_icon VARCHAR2(100);
 BEGIN
   sys.htp.p('<style>
-    .mcp-ilist{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;}}
+    .mcp-ilist{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;color:#333;}}
     .mcp-il-row{{display:flex;align-items:center;gap:12px;padding:11px 16px;
       border-bottom:1px solid #f5f5f5;}}
     .mcp-il-row:last-child{{border-bottom:none;}}
@@ -866,6 +951,7 @@ BEGIN
       display:flex;align-items:center;justify-content:center;flex-shrink:0;}}
     .mcp-il-label{{flex:1;font-size:.88rem;color:#444;}}
     .mcp-il-val{{font-size:.9rem;font-weight:700;color:{clr};}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-ilist">');
   FOR r IN (SELECT {lbl}, {val}{ ', ' + icon_column.upper() if icon_column else '' } FROM ({sql_query})) LOOP
@@ -900,6 +986,7 @@ def apex_add_traffic_light(
     sql_query: str,
     label_column: str = "LABEL",
     status_column: str = "STATUS",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a traffic-light status indicator grid from SQL.
@@ -929,6 +1016,7 @@ def apex_add_traffic_light(
     region_id = ids.next(f"trafficlight_{page_id}_{_esc(region_name)}")
     lbl = label_column.upper()
     sts = status_column.upper()
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE
   v_color VARCHAR2(20);
@@ -938,10 +1026,11 @@ BEGIN
     .mcp-tl-grid{{display:flex;flex-wrap:wrap;gap:10px;padding:6px 0;}}
     .mcp-tl-item{{display:flex;align-items:center;gap:10px;background:#fff;
       border-radius:8px;padding:10px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);
-      flex:1 1 200px;min-width:160px;}}
+      flex:1 1 200px;min-width:160px;color:#333;}}
     .mcp-tl-dot{{width:14px;height:14px;border-radius:50%;flex-shrink:0;
       box-shadow:0 0 0 3px rgba(0,0,0,.1);}}
     .mcp-tl-label{{font-size:.85rem;color:#444;}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-tl-grid">');
   FOR r IN (SELECT {lbl}, UPPER({sts}) AS STATUS_VAL FROM ({sql_query})) LOOP
@@ -990,9 +1079,12 @@ def apex_add_spotlight_metric(
     suffix: str = "",
     prefix: str = "",
     subtitle_sql: str = "",
+    value_size: str = "3.2rem",
+    icon_size: str = "2.4rem",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
-    """Add a large centered spotlight metric — a single KPI in the spotlight.
+    """Add a large centered spotlight metric -- a single KPI in the spotlight.
 
     The value is displayed very large in the center, with the label below.
     Ideal for a primary metric on a dedicated dashboard section.
@@ -1008,6 +1100,9 @@ def apex_add_spotlight_metric(
         suffix: Unit suffix (e.g., "%", " pts").
         prefix: Unit prefix (e.g., "R$ ", "$").
         subtitle_sql: Optional SQL for a smaller subtitle line below the label.
+        value_size: CSS font-size for the metric value (default "3.2rem").
+        icon_size: CSS font-size for the icon (default "2.4rem").
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -1019,6 +1114,7 @@ def apex_add_spotlight_metric(
 
     region_id = ids.next(f"spotlight_{page_id}_{_esc(region_name)}")
     clr = _col(color)
+    extra_css = _esc(custom_css) if custom_css else ""
 
     sub_block = ""
     if subtitle_sql:
@@ -1036,18 +1132,23 @@ BEGIN
   BEGIN EXECUTE IMMEDIATE '{_esc(sql_query)}' INTO v_val;
   EXCEPTION WHEN OTHERS THEN v_val := '-'; END;
   sys.htp.p('<style>
-    .mcp-spotlight{{text-align:center;padding:32px 20px;background:#fff;
+    .mcp-spotlight{{text-align:center;padding:32px 20px;background:#fff;color:#333;
       border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.1);}}
-    .mcp-spot-icon{{font-size:2.4rem;color:{clr};margin-bottom:12px;}}
-    .mcp-spot-val{{font-size:3.2rem;font-weight:800;color:{clr};line-height:1;}}
+    .mcp-spot-icon{{font-size:{_esc(icon_size)};color:{clr};margin-bottom:12px;}}
+    .mcp-spot-val{{font-size:{_esc(value_size)};font-weight:800;color:{clr};line-height:1;}}
     .mcp-spot-label{{font-size:.9rem;color:#888;margin-top:8px;text-transform:uppercase;
       letter-spacing:.6px;font-weight:500;}}
-    .mcp-spot-sub{{font-size:.82rem;color:#aaa;margin-top:6px;}}
+    .mcp-spot-sub{{font-size:.82rem;color:#666;margin-top:6px;}}
+    @media(max-width:480px){{
+      .mcp-spotlight{{padding:20px 12px;}}
+      .mcp-spot-val{{font-size:2rem;}}
+    }}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-spotlight">');
   sys.htp.p('<div class="mcp-spot-icon"><span class="fa {icon}"></span></div>');
-  sys.htp.p('<div class="mcp-spot-val">{_esc(prefix)}' || APEX_ESCAPE.HTML(v_val) || '{_esc(suffix)}</div>');
-  sys.htp.p('<div class="mcp-spot-label">{_esc(label)}</div>');
+  sys.htp.p('<div class="mcp-spot-val">{_esc(_html_esc(prefix))}' || APEX_ESCAPE.HTML(v_val) || '{_esc(_html_esc(suffix))}</div>');
+  sys.htp.p('<div class="mcp-spot-label">{_esc(_html_esc(label))}</div>');
   {sub_block}
   sys.htp.p('</div>');
 END;"""
@@ -1075,23 +1176,25 @@ def apex_add_comparison_panel(
     right_metrics: list[dict[str, str]],
     left_color: str = "blue",
     right_color: str = "green",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a side-by-side comparison panel (A vs B).
 
-    Renders two columns with labels and KPI values — ideal for
+    Renders two columns with labels and KPI values -- ideal for
     period comparison, group A/B analysis, or plan vs actual.
 
     Args:
         page_id: Target page ID.
         region_name: Internal region name.
-        left_label: Header for the left column (e.g., "Período Anterior").
+        left_label: Header for the left column (e.g., "Periodo Anterior").
         left_metrics: Metrics for left column. Each dict:
             {"label": "Total", "sql": "SELECT COUNT(*) FROM ...", "suffix": ""}
-        right_label: Header for the right column (e.g., "Período Atual").
+        right_label: Header for the right column (e.g., "Periodo Atual").
         right_metrics: Metrics for right column (same format as left_metrics).
         left_color: Accent color for left column.
         right_color: Accent color for right column.
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -1105,12 +1208,14 @@ def apex_add_comparison_panel(
     lc = _col(left_color)
     rc = _col(right_color)
 
+    extra_css = _esc(custom_css) if custom_css else ""
+
     def _metrics_block(metrics: list[dict[str, str]], clr: str) -> str:
         lines: list[str] = []
         for m in metrics:
-            lbl = _esc(m.get("label", ""))
+            lbl = _esc(_html_esc(m.get("label", "")))
             sql = _esc(m.get("sql", "SELECT '' FROM DUAL"))
-            sfx = _esc(m.get("suffix", ""))
+            sfx = _esc(_html_esc(m.get("suffix", "")))
             lines.append(
                 f"  BEGIN EXECUTE IMMEDIATE '{sql}' INTO v_val;"
                 f" EXCEPTION WHEN OTHERS THEN v_val := '-'; END;\n"
@@ -1127,25 +1232,27 @@ def apex_add_comparison_panel(
     plsql = f"""DECLARE v_val VARCHAR2(4000);
 BEGIN
   sys.htp.p('<style>
-    .mcp-cmp{{display:flex;gap:16px;}}
-    .mcp-cmp-col{{flex:1;background:#fff;border-radius:10px;
+    .mcp-cmp{{display:flex;gap:16px;flex-wrap:wrap;}}
+    .mcp-cmp-col{{flex:1 1 280px;min-width:250px;background:#fff;border-radius:10px;
       box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;}}
     .mcp-cmp-hdr{{padding:12px 16px;font-weight:700;font-size:.88rem;color:#fff;}}
-    .mcp-cmp-body{{padding:12px 16px;}}
+    .mcp-cmp-body{{padding:12px 16px;color:#333;}}
     .mcp-cmp-row{{display:flex;justify-content:space-between;padding:7px 0;
       border-bottom:1px solid #f5f5f5;font-size:.85rem;}}
     .mcp-cmp-row:last-child{{border-bottom:none;}}
     .mcp-cmp-lbl{{color:#666;}}
     .mcp-cmp-val{{font-weight:700;}}
+    @media(max-width:600px){{.mcp-cmp{{flex-direction:column;}}.mcp-cmp-col{{min-width:0;}}}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-cmp">');
   sys.htp.p('<div class="mcp-cmp-col">');
-  sys.htp.p('<div class="mcp-cmp-hdr" style="background:{lc}">{_esc(left_label)}</div>');
+  sys.htp.p('<div class="mcp-cmp-hdr" style="background:{lc}">{_esc(_html_esc(left_label))}</div>');
   sys.htp.p('<div class="mcp-cmp-body">');
 {left_block}
   sys.htp.p('</div></div>');
   sys.htp.p('<div class="mcp-cmp-col">');
-  sys.htp.p('<div class="mcp-cmp-hdr" style="background:{rc}">{_esc(right_label)}</div>');
+  sys.htp.p('<div class="mcp-cmp-hdr" style="background:{rc}">{_esc(_html_esc(right_label))}</div>');
   sys.htp.p('<div class="mcp-cmp-body">');
 {right_block}
   sys.htp.p('</div></div>');
@@ -1177,6 +1284,7 @@ def apex_add_activity_stream(
     default_icon: str = "fa-circle",
     default_color: str = "blue",
     max_rows: int = 20,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a scrollable activity/audit stream from SQL.
@@ -1217,6 +1325,7 @@ def apex_add_activity_stream(
         extra_cols += f", {icon_column.upper()}"
     if color_column:
         extra_cols += f", {color_column.upper()}"
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE
   v_icon  VARCHAR2(100);
@@ -1225,7 +1334,7 @@ def apex_add_activity_stream(
 BEGIN
   sys.htp.p('<style>
     .mcp-act{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);
-      max-height:440px;overflow-y:auto;}}
+      max-height:440px;overflow-y:auto;color:#333;}}
     .mcp-act-hdr{{padding:12px 16px;font-weight:700;font-size:.88rem;
       border-bottom:1px solid #eee;color:#444;}}
     .mcp-act-item{{display:flex;gap:12px;padding:11px 16px;border-bottom:1px solid #f8f8f8;}}
@@ -1235,9 +1344,10 @@ BEGIN
     .mcp-act-body{{flex:1;}}
     .mcp-act-text{{font-size:.85rem;color:#444;margin-bottom:3px;line-height:1.4;}}
     .mcp-act-date{{font-size:.75rem;color:#aaa;}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-act">');
-  sys.htp.p('<div class="mcp-act-hdr">{_esc(region_name)}</div>');
+  sys.htp.p('<div class="mcp-act-hdr">{_esc(_html_esc(region_name))}</div>');
   FOR r IN (SELECT {txt}, {dt}{extra_cols} FROM ({sql_query}) WHERE ROWNUM <= {max_rows}) LOOP
     v_icon  := {ico_expr};
     v_color := {clr_expr};
@@ -1280,9 +1390,10 @@ def apex_add_status_matrix(
     label_column: str = "LABEL",
     status_column: str = "STATUS",
     group_column: str = "",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
-    """Add a status matrix grid — items with colored status dots and labels.
+    """Add a status matrix grid -- items with colored status dots and labels.
 
     Organizes items in a card grid with color-coded status badges.
     Optional group_column adds a subtle category label.
@@ -1310,6 +1421,7 @@ def apex_add_status_matrix(
     grp_select = f", {grp_col}" if group_column else ""
     grp_display = (f"sys.htp.p('<div class=\"mcp-sm-group\">'||APEX_ESCAPE.HTML(r.{grp_col})||'</div>');"
                    if group_column else "")
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE
   v_color VARCHAR2(20);
@@ -1318,12 +1430,14 @@ BEGIN
   sys.htp.p('<style>
     .mcp-sm-grid{{display:flex;flex-wrap:wrap;gap:10px;padding:4px 0;}}
     .mcp-sm-card{{flex:1 1 180px;min-width:150px;background:#fff;border-radius:8px;
-      padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);}}
+      padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);color:#333;}}
     .mcp-sm-top{{display:flex;align-items:center;gap:8px;}}
     .mcp-sm-dot{{width:10px;height:10px;border-radius:50%;flex-shrink:0;}}
     .mcp-sm-label{{font-size:.85rem;color:#444;font-weight:500;flex:1;}}
     .mcp-sm-badge{{font-size:.72rem;padding:2px 8px;border-radius:10px;font-weight:600;}}
     .mcp-sm-group{{font-size:.7rem;color:#aaa;margin-top:5px;text-transform:uppercase;letter-spacing:.4px;}}
+    @media(max-width:480px){{.mcp-sm-card{{flex:1 1 100%;min-width:0;}}}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-sm-grid">');
   FOR r IN (SELECT {lbl}, {sts}{grp_select} FROM ({sql_query})) LOOP
@@ -1373,6 +1487,7 @@ def apex_add_collapsible_region(
     content_html: str = "",
     content_sql: str = "",
     collapsed: bool = False,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a collapsible/expandable section to a page.
@@ -1400,6 +1515,7 @@ def apex_add_collapsible_region(
     uid = region_id % 999999
     init_display = "none" if collapsed else "block"
     icon_init = "fa-chevron-right" if collapsed else "fa-chevron-down"
+    extra_css = _esc(custom_css) if custom_css else ""
 
     if content_sql:
         body_block = (
@@ -1408,7 +1524,7 @@ def apex_add_collapsible_region(
         )
         body_output = "  sys.htp.p(APEX_ESCAPE.HTML(v_body));"
     else:
-        body_block = f"  v_body := '{_esc(content_html or '(Conteúdo não configurado.)')}'; "
+        body_block = f"  v_body := '{_esc(content_html or '(Conteudo nao configurado.)')}'; "
         body_output = "  sys.htp.p(v_body);"
 
     plsql = f"""DECLARE v_body VARCHAR2(32767);
@@ -1417,11 +1533,12 @@ BEGIN
   sys.htp.p('<style>
     .mcp-collapse-hdr{{display:flex;align-items:center;gap:8px;cursor:pointer;
       padding:12px 16px;background:#f8f9fa;border-radius:8px;user-select:none;
-      border:1px solid #e9ecef;}}
+      border:1px solid #e9ecef;color:#333;}}
     .mcp-collapse-hdr:hover{{background:#e9ecef;}}
     .mcp-collapse-hdr-title{{flex:1;font-weight:600;font-size:.9rem;color:#444;}}
     .mcp-collapse-body{{padding:14px 16px;border:1px solid #e9ecef;border-top:none;
-      border-radius:0 0 8px 8px;background:#fff;margin-bottom:8px;}}
+      border-radius:0 0 8px 8px;background:#fff;margin-bottom:8px;color:#333;}}
+    {extra_css}
   </style>');
   sys.htp.p('<div onclick="var b=document.getElementById(''mcpc{uid}'');'||
             'var i=document.getElementById(''mcpi{uid}'');'||
@@ -1455,6 +1572,7 @@ def apex_add_tabs_container(
     region_name: str,
     tabs: list[dict[str, str]],
     color: str = "unimed",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a tabbed content container to a page.
@@ -1483,11 +1601,12 @@ def apex_add_tabs_container(
     region_id = ids.next(f"tabs_{page_id}_{_esc(region_name)}")
     uid = region_id % 999999
     clr = _col(color)
+    extra_css = _esc(custom_css) if custom_css else ""
 
     tab_btns: list[str] = []
     tab_panels: list[str] = []
     for i, tab in enumerate(tabs):
-        lbl = _esc(tab.get("label", f"Tab {i+1}"))
+        lbl = _esc(_html_esc(tab.get("label", f"Tab {i+1}")))
         ico = tab.get("icon", "")
         ico_html = f'<span class="fa {ico}" style="margin-right:5px"></span>' if ico else ""
         active_cls = "mcp-tab-active" if i == 0 else "mcp-tab-btn"
@@ -1526,7 +1645,12 @@ BEGIN
       margin-bottom:-2px;transition:all .2s;}}
     .mcp-tab-btn:hover{{color:{clr};}}
     .mcp-tab-active{{color:{clr};border-bottom-color:{clr};background:#fff;font-weight:700;}}
-    .mcp-tab-panel{{padding:16px;}}
+    .mcp-tab-panel{{padding:16px;color:#333;}}
+    @media(max-width:600px){{
+      .mcp-tab-bar{{flex-wrap:wrap;}}
+      .mcp-tab-btn,.mcp-tab-active{{flex:1 1 auto;text-align:center;padding:9px 12px;font-size:.78rem;}}
+    }}
+    {extra_css}
   </style>');
   sys.htp.p('<script>function mcpTab(u,n,t){{for(var i=0;i<t;i++){{
     var b=document.getElementById(''mcp-tbtn-''+u+''-''+i);
@@ -1564,11 +1688,12 @@ def apex_add_data_card_grid(
     url_column: str = "",
     color: str = "blue",
     columns: int = 3,
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
-    """Add a SQL-driven card grid — each row becomes a visual card.
+    """Add a SQL-driven card grid -- each row becomes a visual card.
 
-    More flexible than APEX native Cards — supports custom badge,
+    More flexible than APEX native Cards -- supports custom badge,
     subtitle, and optional URL per row. Pure HTML rendering.
 
     Args:
@@ -1585,7 +1710,8 @@ def apex_add_data_card_grid(
         badge_column: Column for badge text (optional, e.g., status).
         url_column: Column for card click URL (optional).
         color: Accent color for value and border.
-        columns: Grid columns (2–4).
+        columns: Grid columns (2-4).
+        custom_css: Additional CSS rules injected into the style block.
         sequence: Display order on page.
 
     Returns:
@@ -1600,6 +1726,7 @@ def apex_add_data_card_grid(
     ttl = title_column.upper()
     val = value_column.upper()
     col_pct = {2: "48%", 3: "31%", 4: "23%"}.get(columns, "31%")
+    extra_css = _esc(custom_css) if custom_css else ""
 
     extra_cols = ""
     if subtitle_column:
@@ -1621,13 +1748,15 @@ def apex_add_data_card_grid(
     .mcp-dc-grid{{display:flex;flex-wrap:wrap;gap:14px;padding:4px 0;}}
     .mcp-dc-card{{flex:1 1 {col_pct};min-width:160px;background:#fff;border-radius:10px;
       padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.08);border-top:3px solid {clr};
-      transition:transform .15s;}}
+      transition:transform .15s;color:#333;}}
     .mcp-dc-card:hover{{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.12);}}
     .mcp-dc-title{{font-size:.9rem;font-weight:700;color:#333;margin-bottom:4px;}}
     .mcp-dc-sub{{font-size:.78rem;color:#888;margin-bottom:8px;}}
     .mcp-dc-val{{font-size:1.6rem;font-weight:800;color:{clr};}}
     .mcp-dc-badge{{display:inline-block;font-size:.72rem;padding:2px 8px;border-radius:10px;
       background:{clr}22;color:{clr};font-weight:600;margin-top:6px;}}
+    @media(max-width:600px){{.mcp-dc-card{{flex:1 1 100%;min-width:0;}}}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-dc-grid">');
   FOR r IN (SELECT {ttl}, {val}{extra_cols} FROM ({sql_query})) LOOP
@@ -1665,6 +1794,7 @@ def apex_add_heatmap_grid(
     col_column: str = "COL_LABEL",
     value_column: str = "VALUE",
     color: str = "blue",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a heatmap grid (cross-tab matrix) with color-intensity cells.
@@ -1699,6 +1829,7 @@ def apex_add_heatmap_grid(
     row_col = row_column.upper()
     col_col = col_column.upper()
     val_col = value_column.upper()
+    extra_css = _esc(custom_css) if custom_css else ""
 
     plsql = f"""DECLARE
   TYPE t_rows IS TABLE OF VARCHAR2(200) INDEX BY PLS_INTEGER;
@@ -1743,6 +1874,8 @@ BEGIN
     .mcp-hm td{{padding:7px 10px;border:1px solid #eee;text-align:center;
       font-weight:600;color:#333;}}
     .mcp-hm td.row-hdr{{text-align:left;background:#f9f9f9;color:#555;font-weight:600;}}
+    @media(max-width:600px){{.mcp-hm{{overflow-x:auto;}}}}
+    {extra_css}
   </style>');
   sys.htp.p('<div class="mcp-hm"><table>');
   sys.htp.p('<tr><th></th>');
@@ -1789,6 +1922,7 @@ def apex_add_ribbon_stats(
     region_name: str,
     metrics: list[dict[str, Any]],
     bg_color: str = "#f8f9fa",
+    custom_css: str = "",
     sequence: int = 10,
 ) -> str:
     """Add a full-width colored ribbon with multiple KPI stats side by side.
@@ -1816,28 +1950,33 @@ def apex_add_ribbon_stats(
         return err
 
     region_id = ids.next(f"ribbon_{page_id}_{_esc(region_name)}")
+    extra_css = _esc(custom_css) if custom_css else ""
     lines = [
         "DECLARE v_val VARCHAR2(4000);",
         "BEGIN",
         f"  sys.htp.p('<style>"
-        f".mcp-ribbon{{display:flex;background:{_esc(bg_color)};border-radius:10px;"
-        f"padding:16px 8px;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-bottom:12px;}}"
-        f".mcp-rib-item{{flex:1;display:flex;align-items:center;gap:12px;padding:0 16px;"
-        f"border-right:1px solid rgba(0,0,0,.08);}}"
+        f".mcp-ribbon{{display:flex;flex-wrap:wrap;background:{_esc(bg_color)};border-radius:10px;"
+        f"padding:16px 8px;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-bottom:12px;color:#333;}}"
+        f".mcp-rib-item{{flex:1 1 auto;display:flex;align-items:center;gap:12px;padding:0 16px;"
+        f"border-right:1px solid rgba(0,0,0,.08);min-width:120px;}}"
         f".mcp-rib-item:last-child{{border-right:none;}}"
         f".mcp-rib-icon{{font-size:1.8rem;}}"
         f".mcp-rib-text{{display:flex;flex-direction:column;}}"
         f".mcp-rib-val{{font-size:1.3rem;font-weight:700;color:#333;line-height:1;}}"
         f".mcp-rib-lbl{{font-size:.72rem;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.4px;}}"
+        f"@media(max-width:600px){{.mcp-ribbon{{flex-direction:column;gap:12px;}}"
+        f".mcp-rib-item{{border-right:none;border-bottom:1px solid rgba(0,0,0,.06);padding:8px 16px;}}"
+        f".mcp-rib-item:last-child{{border-bottom:none;}}}}"
+        f"{extra_css}"
         f"</style>');",
         "  sys.htp.p('<div class=\"mcp-ribbon\">');",
     ]
     for m in metrics:
-        lbl = _esc(m.get("label", ""))
+        lbl = _esc(_html_esc(m.get("label", "")))
         sql = _esc(m.get("sql", "SELECT '' FROM DUAL"))
         ico = m.get("icon", "fa-chart-bar")
         clr = _col(m.get("color", "blue"))
-        sfx = _esc(m.get("suffix", ""))
+        sfx = _esc(_html_esc(m.get("suffix", "")))
         lines.append(
             f"  BEGIN EXECUTE IMMEDIATE '{sql}' INTO v_val;"
             f" EXCEPTION WHEN OTHERS THEN v_val := '-'; END;\n"

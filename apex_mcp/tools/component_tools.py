@@ -23,11 +23,20 @@ from ..templates import (
     ITEM_DISPLAY,
     ITEM_CHECKBOX,
     ITEM_RADIO,
+    ITEM_RICH_TEXT,
+    ITEM_COLOR_PICKER,
+    ITEM_STAR_RATING,
+    ITEM_RANGE_SLIDER,
+    ITEM_QR_CODE,
     REGION_IR,
     REGION_FORM,
     REGION_STATIC,
     REGION_PLSQL,
     REGION_CHART,
+    REGION_CARDS,
+    REGION_LIST,
+    REGION_TREE,
+    REGION_MAP,
     BTN_ACTION_SUBMIT,
     BTN_ACTION_REDIRECT,
     BTN_ACTION_DEFINED,
@@ -86,6 +95,8 @@ def apex_add_region(
     template: str | None = None,
     grid_column: str = "BODY",
     attributes: dict | None = None,
+    labels: dict[str, str] | None = None,
+    download_formats: str = "CSV:HTML:XLSX:PDF",
 ) -> str:
     """Add a region to a page.
 
@@ -94,10 +105,15 @@ def apex_add_region(
         region_name: Display name of the region.
         region_type: Type of region:
             - "static": Static HTML content (use static_content param)
+            - "html": Alias for "static"
             - "ir": Interactive Report (use source_sql param) — best for data grids
             - "form": Form container (add items with apex_add_item after)
             - "chart": JET Chart
             - "plsql": PL/SQL Dynamic Content
+            - "cards": Native Cards region
+            - "list": Native List region
+            - "tree": Native Tree region
+            - "map": Native Map region
         sequence: Display sequence (10, 20, 30...).
         source_sql: SQL query for ir/chart regions (e.g., "SELECT * FROM my_table").
         static_content: HTML for static regions.
@@ -105,6 +121,12 @@ def apex_add_region(
         grid_column: Page layout position: "BODY", "BREADCRUMB_BAR", "AFTER_HEADER",
                      "BEFORE_FOOTER", "AFTER_FOOTER".
         attributes: Extra template options dict.
+        labels: Custom label overrides for IR regions. Supported keys:
+            - "no_data_found": Message when query returns no rows (default "No data found.")
+            - "max_row_count": Max row count warning message (default uses APEX #MAX_ROW_COUNT# token)
+            If None, English defaults are used.
+        download_formats: Colon-separated download format list for IR regions
+            (default "CSV:HTML:XLSX:PDF").
 
     Best practices:
         - IR regions: always provide source_sql with proper WHERE clauses
@@ -122,10 +144,15 @@ def apex_add_region(
         # Map region type to APEX native type and default template
         type_map = {
             "static":  (REGION_STATIC, REGION_TMPL_STANDARD),
+            "html":    (REGION_STATIC, REGION_TMPL_STANDARD),
             "ir":      (REGION_IR,     REGION_TMPL_IR),
             "form":    (REGION_FORM,   REGION_TMPL_STANDARD),
             "chart":   (REGION_CHART,  REGION_TMPL_STANDARD),
             "plsql":   (REGION_PLSQL,  REGION_TMPL_STANDARD),
+            "cards":   (REGION_CARDS,  REGION_TMPL_STANDARD),
+            "list":    (REGION_LIST,   REGION_TMPL_STANDARD),
+            "tree":    (REGION_TREE,   REGION_TMPL_STANDARD),
+            "map":     (REGION_MAP,    REGION_TMPL_STANDARD),
         }
         apex_region_type, default_tmpl = type_map.get(region_type_lower, (REGION_STATIC, REGION_TMPL_STANDARD))
 
@@ -141,7 +168,7 @@ def apex_add_region(
 
         # Build source attribute lines
         source_line = ""
-        if region_type_lower == "static" and static_content:
+        if region_type_lower in ("static", "html") and static_content:
             source_line = f",p_plug_source=>'{_esc(static_content)}'"
         elif region_type_lower in ("ir", "plsql", "chart") and source_sql:
             source_line = f",p_plug_source=>'{_esc(source_sql)}'"
@@ -169,18 +196,28 @@ wwv_flow_imp_page.create_page_plug(
         # For Interactive Report regions, create the worksheet definition
         if region_type_lower == "ir" and source_sql:
             ws_id = ids.next(f"worksheet_{page_id}_{region_id}")
+            # Resolve IR labels — use caller overrides or English defaults
+            _labels = labels or {}
+            _no_data_msg = _labels.get(
+                "no_data_found", "No data found."
+            )
+            _max_row_msg = _labels.get(
+                "max_row_count",
+                "The maximum row count for this report is #MAX_ROW_COUNT# rows."
+                "  Please apply a filter to reduce the number of records in your query.",
+            )
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_worksheet(
  p_id=>wwv_flow_imp.id({ws_id})
-,p_max_row_count_message=>'The maximum row count for this report is #MAX_ROW_COUNT# rows.  Please apply a filter to reduce the number of records in your query.'
-,p_no_data_found_message=>'No data found.'
+,p_max_row_count_message=>'{_esc(_max_row_msg)}'
+,p_no_data_found_message=>'{_esc(_no_data_msg)}'
 ,p_pagination_type=>'ROWS_X_TO_Y'
 ,p_pagination_display_pos=>'BOTTOM_RIGHT'
 ,p_report_list_mode=>'TABS'
 ,p_lazy_loading=>false
 ,p_show_detail_link=>'N'
 ,p_show_notify=>'Y'
-,p_download_formats=>'CSV:HTML:XLSX'
+,p_download_formats=>'{_esc(download_formats)}'
 ,p_enable_mail_download=>'Y'
 ,p_internal_uid=>{ws_id}
 );"""))
@@ -237,10 +274,16 @@ def apex_add_item(
             - "hidden": Hidden field (no label shown)
             - "textarea": Multi-line text
             - "yes_no": Yes/No switch
+            - "switch": Alias for yes_no
             - "password": Password field (masked)
             - "display": Display-only (non-editable)
             - "checkbox": Checkbox group
             - "radio": Radio button group
+            - "rich_text": Rich text editor (WYSIWYG)
+            - "color_picker": Color picker
+            - "star_rating": Star rating input
+            - "slider": Range slider
+            - "qr_code": QR code display
         label: Display label. Auto-generated from item_name if omitted.
         sequence: Display order within the region.
         source_column: Database column to bind (for form DML, e.g., "FIRST_NAME").
@@ -278,17 +321,23 @@ def apex_add_item(
 
         # Map friendly type to APEX native type
         item_type_map = {
-            "text":     ITEM_TEXT,
-            "number":   ITEM_NUMBER,
-            "date":     ITEM_DATE,
-            "select":   ITEM_SELECT,
-            "hidden":   ITEM_HIDDEN,
-            "textarea": ITEM_TEXTAREA,
-            "yes_no":   ITEM_YES_NO,
-            "password": ITEM_PASSWORD,
-            "display":  ITEM_DISPLAY,
-            "checkbox": ITEM_CHECKBOX,
-            "radio":    ITEM_RADIO,
+            "text":         ITEM_TEXT,
+            "number":       ITEM_NUMBER,
+            "date":         ITEM_DATE,
+            "select":       ITEM_SELECT,
+            "hidden":       ITEM_HIDDEN,
+            "textarea":     ITEM_TEXTAREA,
+            "yes_no":       ITEM_YES_NO,
+            "password":     ITEM_PASSWORD,
+            "display":      ITEM_DISPLAY,
+            "checkbox":     ITEM_CHECKBOX,
+            "radio":        ITEM_RADIO,
+            "rich_text":    ITEM_RICH_TEXT,
+            "color_picker": ITEM_COLOR_PICKER,
+            "star_rating":  ITEM_STAR_RATING,
+            "switch":       ITEM_YES_NO,
+            "slider":       ITEM_RANGE_SLIDER,
+            "qr_code":      ITEM_QR_CODE,
         }
         apex_item_type = item_type_map.get(item_type_lower, ITEM_TEXT)
 

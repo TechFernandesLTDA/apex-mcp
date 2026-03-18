@@ -6,16 +6,65 @@ area multi-series, animated counters, and gradient donut charts.
 from __future__ import annotations
 from ..db import db
 from ..ids import ids
+from ..palette import resolve_color, resolve_palette, COLORS
 from ..session import session, RegionInfo, ChartInfo
 from ..templates import REGION_TMPL_STANDARD, REGION_TMPL_BLANK
 from ..utils import _json, _esc, _blk, _sql_to_varchar2
 
-_ZOOM_BOOLS = (
+
+def _col(name: str) -> str:
+    """Resolve color name or hex to hex value."""
+    return resolve_color(name)
+
+_ZOOM_BOOLS_OFF = (
     ",p_zoom_order_seconds=>false,p_zoom_order_minutes=>false"
     ",p_zoom_order_hours=>false,p_zoom_order_days=>false"
     ",p_zoom_order_weeks=>false,p_zoom_order_months=>false"
     ",p_zoom_order_quarters=>false,p_zoom_order_years=>false"
 )
+
+_ZOOM_BOOLS_ON = (
+    ",p_zoom_order_seconds=>true,p_zoom_order_minutes=>true"
+    ",p_zoom_order_hours=>true,p_zoom_order_days=>true"
+    ",p_zoom_order_weeks=>true,p_zoom_order_months=>true"
+    ",p_zoom_order_quarters=>true,p_zoom_order_years=>true"
+)
+
+# Keep legacy alias so any external code still works.
+_ZOOM_BOOLS = _ZOOM_BOOLS_OFF
+
+
+def _zoom_bools(zoom_enabled: bool = False) -> str:
+    """Return the zoom-order boolean block for JET chart axes."""
+    return _ZOOM_BOOLS_ON if zoom_enabled else _ZOOM_BOOLS_OFF
+
+
+def _zoom_scroll_value(zoom_enabled: bool = False,
+                       scroll_enabled: bool = False) -> str:
+    """Return the ``p_zoom_and_scroll`` APEX enum value."""
+    if zoom_enabled and scroll_enabled:
+        return "live"
+    if zoom_enabled:
+        return "live"
+    if scroll_enabled:
+        return "scroll"
+    return "off"
+
+
+def _animation_value(animation: str = "auto") -> str:
+    """Map the user-friendly *animation* keyword to APEX enum values.
+
+    Returns a two-tuple string fragment for ``p_animation_on_display``
+    and ``p_animation_on_data_change``.
+    """
+    _MAP = {
+        "auto": "auto",
+        "none": "none",
+        "fade": "alphaFade",
+        "zoom": "zoom",
+    }
+    val = _MAP.get(animation, "auto")
+    return val
 
 
 def _jet_region(region_id: int, region_name: str, sequence: int) -> None:
@@ -44,7 +93,8 @@ wwv_flow_imp_page.create_page_plug(
 
 
 def _jet_axis(chart_id: int, axis: str, ax_id: int,
-              title: str = "", y2: bool = False) -> None:
+              title: str = "", y2: bool = False,
+              zoom_enabled: bool = False) -> None:
     """Create a chart axis definition (X, Y, or Y2).
 
     Args:
@@ -53,6 +103,7 @@ def _jet_axis(chart_id: int, axis: str, ax_id: int,
         ax_id: Unique ID for this axis object.
         title: Optional axis title label.
         y2: Whether this is a secondary Y axis (currently unused, reserved).
+        zoom_enabled: Enable zoom on this axis (default False).
     """
     t_line = f",p_title=>'{_esc(title)}'" if title else ""
     db.plsql(_blk(f"""
@@ -63,7 +114,7 @@ wwv_flow_imp_page.create_jet_chart_axis(
 {t_line},p_format_scaling=>'auto',p_scaling=>'linear'
 ,p_baseline_scaling=>'zero',p_major_tick_rendered=>'on'
 ,p_minor_tick_rendered=>'off',p_tick_label_rendered=>'on'
-{_ZOOM_BOOLS});"""))
+{_zoom_bools(zoom_enabled)});"""))
 
 
 def _guard(page_id: int) -> str | None:
@@ -93,6 +144,11 @@ def apex_add_stacked_chart(
     y_axis_title: str = "",
     x_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a stacked bar or area chart with multiple SQL-driven series.
 
@@ -102,7 +158,7 @@ def apex_add_stacked_chart(
     Args:
         page_id: Target page ID.
         region_name: Region display name.
-        series_list: List of 2–6 series dicts, each with:
+        series_list: List of 1–10 series dicts, each with:
             - "name": Legend label for this series
             - "sql": SQL returning LABEL (X-axis) and VALUE (Y-axis) columns
             - "label_column": X-axis column name (default "LABEL")
@@ -112,26 +168,36 @@ def apex_add_stacked_chart(
         y_axis_title: Y-axis label.
         x_axis_title: X-axis label.
         sequence: Display order on page.
+        labels: Optional dict of localised labels (currently unused for this chart
+            type, reserved for future use).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None
+            for default colours.
 
     Returns:
         JSON with status, region_id, chart_type, series_count.
 
     Example:
-        apex_add_stacked_chart(page_id=1, region_name="Por Clínica e Status",
+        apex_add_stacked_chart(page_id=1, region_name="By Clinic & Status",
             series_list=[
-                {"name": "Concluída", "sql": "SELECT ID_CLINICA LABEL, COUNT(*) VALUE FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' GROUP BY ID_CLINICA ORDER BY 1"},
-                {"name": "Em Andamento", "sql": "SELECT ID_CLINICA LABEL, COUNT(*) VALUE FROM TEA_AVALIACOES WHERE DS_STATUS='EM_ANDAMENTO' GROUP BY ID_CLINICA ORDER BY 1"},
+                {"name": "Completed", "sql": "SELECT ID_CLINICA LABEL, COUNT(*) VALUE FROM TEA_AVALIACOES WHERE DS_STATUS='CONCLUIDA' GROUP BY ID_CLINICA ORDER BY 1"},
+                {"name": "In Progress", "sql": "SELECT ID_CLINICA LABEL, COUNT(*) VALUE FROM TEA_AVALIACOES WHERE DS_STATUS='EM_ANDAMENTO' GROUP BY ID_CLINICA ORDER BY 1"},
             ])
     """
     err = _guard(page_id)
     if err:
         return err
-    if not series_list or len(series_list) < 2:
-        return _json({"status": "error", "error": "series_list requires at least 2 series."})
+    if not series_list or len(series_list) < 1 or len(series_list) > 10:
+        return _json({"status": "error", "error": "series_list requires 1–10 series."})
 
     apex_type = "area" if chart_type == "area" else "bar"
     region_id = ids.next(f"stacked_{page_id}_{_esc(region_name)}")
     chart_id  = ids.next(f"stchart_{page_id}_{region_id}")
+    anim = _animation_value(animation)
+    zs = _zoom_scroll_value(zoom_enabled, scroll_enabled)
+    palette = resolve_palette(color_palette, len(series_list)) if color_palette else None
 
     try:
         _jet_region(region_id, region_name, sequence)
@@ -141,15 +207,15 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_chart_type=>'{apex_type}'
 ,p_height=>'{height}'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
+,p_animation_on_display=>'{anim}'
+,p_animation_on_data_change=>'{anim}'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
 ,p_hide_and_show_behavior=>'withRescale'
 ,p_stack=>'on'
 ,p_stack_label=>'on'
 ,p_connect_nulls=>'Y'
-,p_zoom_and_scroll=>'off'
+,p_zoom_and_scroll=>'{zs}'
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
@@ -165,6 +231,8 @@ wwv_flow_imp_page.create_jet_chart(
             s_nm  = _esc(s.get("name", f"Series {i+1}"))
             lc = s.get("label_column", "LABEL").upper()
             vc = s.get("value_column", "VALUE").upper()
+            clr_line = (f",p_color=>'{palette[i % len(palette)]}'"
+                        if palette else "")
             db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({s_id})
@@ -180,9 +248,11 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'off'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
-        _jet_axis(chart_id, "y", ids.next(f"stay_{region_id}"), y_axis_title)
-        _jet_axis(chart_id, "x", ids.next(f"stax_{region_id}"), x_axis_title)
+{clr_line});"""))
+        _jet_axis(chart_id, "y", ids.next(f"stay_{region_id}"),
+                  y_axis_title, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "x", ids.next(f"stax_{region_id}"),
+                  x_axis_title, zoom_enabled=zoom_enabled)
         session.regions[region_id] = RegionInfo(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart",
@@ -207,7 +277,7 @@ def apex_add_combo_chart(
     bar_sql: str,
     line_sql: str,
     bar_name: str = "Volume",
-    line_name: str = "Tendência",
+    line_name: str = "Trend",
     bar_label_col: str = "LABEL",
     bar_value_col: str = "VALUE",
     line_label_col: str = "LABEL",
@@ -216,6 +286,11 @@ def apex_add_combo_chart(
     y_axis_title: str = "",
     y2_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a combo chart with bars (primary, left Y) and a line (secondary, right Y).
 
@@ -242,6 +317,12 @@ def apex_add_combo_chart(
         y_axis_title: Left Y-axis (bar) label.
         y2_axis_title: Right Y-axis (line) label.
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported keys:
+            ``"bar"`` (bar legend), ``"line"`` (line legend).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
@@ -254,6 +335,12 @@ def apex_add_combo_chart(
     chart_id    = ids.next(f"combochart_{page_id}_{region_id}")
     bar_ser_id  = ids.next(f"combo_bar_{page_id}_{region_id}")
     line_ser_id = ids.next(f"combo_line_{page_id}_{region_id}")
+    anim = _animation_value(animation)
+    zs = _zoom_scroll_value(zoom_enabled, scroll_enabled)
+    palette = resolve_palette(color_palette, 2) if color_palette else None
+    # Resolve label overrides
+    _bar_name = labels.get("bar", bar_name) if labels else bar_name
+    _line_name = labels.get("line", line_name) if labels else line_name
 
     try:
         _jet_region(region_id, region_name, sequence)
@@ -263,13 +350,13 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_chart_type=>'combo'
 ,p_height=>'{height}'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
+,p_animation_on_display=>'{anim}'
+,p_animation_on_data_change=>'{anim}'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
 ,p_stack=>'off'
 ,p_connect_nulls=>'Y'
-,p_zoom_and_scroll=>'off'
+,p_zoom_and_scroll=>'{zs}'
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
@@ -279,11 +366,12 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_horizontal_grid=>'auto'
 ,p_vertical_grid=>'auto'
 );"""))
+        bar_clr = f",p_color=>'{palette[0]}'" if palette else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({bar_ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>10,p_name=>'{_esc(bar_name)}'
+,p_seq=>10,p_name=>'{_esc(_bar_name)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(bar_sql)}
 ,p_items_value_column_name=>'{bar_value_col.upper()}'
@@ -294,12 +382,13 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'off'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
+{bar_clr});"""))
+        line_clr = f",p_color=>'{palette[1]}'" if palette and len(palette) > 1 else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({line_ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>20,p_name=>'{_esc(line_name)}'
+,p_seq=>20,p_name=>'{_esc(_line_name)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(line_sql)}
 ,p_items_value_column_name=>'{line_value_col.upper()}'
@@ -311,10 +400,13 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'on'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
-        _jet_axis(chart_id, "y",  ids.next(f"combo_y_{region_id}"),  y_axis_title)
-        _jet_axis(chart_id, "y2", ids.next(f"combo_y2_{region_id}"), y2_axis_title)
-        _jet_axis(chart_id, "x",  ids.next(f"combo_x_{region_id}"))
+{line_clr});"""))
+        _jet_axis(chart_id, "y",  ids.next(f"combo_y_{region_id}"),
+                  y_axis_title, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "y2", ids.next(f"combo_y2_{region_id}"),
+                  y2_axis_title, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "x",  ids.next(f"combo_x_{region_id}"),
+                  zoom_enabled=zoom_enabled)
         session.regions[region_id] = RegionInfo(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart",
@@ -338,15 +430,22 @@ def apex_add_pareto_chart(
     sql_query: str,
     label_column: str = "LABEL",
     value_column: str = "VALUE",
-    bar_name: str = "Quantidade",
-    line_name: str = "Acumulado %",
+    bar_name: str = "Count",
+    line_name: str = "Cumulative %",
     height: int = 380,
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
+    cumulative_sql: str | None = None,
 ) -> str:
     """Add a Pareto chart (descending bars + cumulative % line on right axis).
 
     Classic Pareto / 80-20 analysis chart. SQL should be ordered by value DESC.
-    The cumulative line is automatically computed from the source data.
+    The cumulative line is automatically computed from the source data unless
+    *cumulative_sql* is provided.
 
     Args:
         page_id: Target page ID.
@@ -360,6 +459,17 @@ def apex_add_pareto_chart(
         line_name: Legend name for the cumulative % line.
         height: Chart height in pixels.
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported keys:
+            ``"bar"`` (bar legend), ``"line"`` (line legend),
+            ``"y2_axis"`` (right Y-axis title).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None
+            for default colours.
+        cumulative_sql: Custom SQL for the cumulative % line.  Must return
+            the same label column and a ``VALUE`` column.  When ``None``,
+            the cumulative SQL is auto-generated from *sql_query*.
 
     Returns:
         JSON with status, region_id.
@@ -370,17 +480,28 @@ def apex_add_pareto_chart(
 
     lc = label_column.upper()
     vc = value_column.upper()
-    cum_sql = (
-        f"SELECT {lc}, "
-        f"ROUND(SUM({vc}) OVER (ORDER BY {vc} DESC "
-        f"ROWS UNBOUNDED PRECEDING) / NULLIF(SUM({vc}) OVER (),0) * 100, 1) AS VALUE "
-        f"FROM ({sql_query})"
-    )
+    # Resolve label overrides
+    _bar_name = labels.get("bar", bar_name) if labels else bar_name
+    _line_name = labels.get("line", line_name) if labels else line_name
+    _y2_title = labels.get("y2_axis", "Cumulative %") if labels else "Cumulative %"
+
+    if cumulative_sql is not None:
+        cum_sql = cumulative_sql
+    else:
+        cum_sql = (
+            f"SELECT {lc}, "
+            f"ROUND(SUM({vc}) OVER (ORDER BY {vc} DESC "
+            f"ROWS UNBOUNDED PRECEDING) / NULLIF(SUM({vc}) OVER (),0) * 100, 1) AS VALUE "
+            f"FROM ({sql_query})"
+        )
 
     region_id   = ids.next(f"pareto_{page_id}_{_esc(region_name)}")
     chart_id    = ids.next(f"paretochart_{page_id}_{region_id}")
     bar_ser_id  = ids.next(f"pareto_bar_{page_id}_{region_id}")
     line_ser_id = ids.next(f"pareto_line_{page_id}_{region_id}")
+    anim = _animation_value(animation)
+    zs = _zoom_scroll_value(zoom_enabled, scroll_enabled)
+    palette = resolve_palette(color_palette, 2) if color_palette else None
 
     try:
         _jet_region(region_id, region_name, sequence)
@@ -390,13 +511,13 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_chart_type=>'combo'
 ,p_height=>'{height}'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
+,p_animation_on_display=>'{anim}'
+,p_animation_on_data_change=>'{anim}'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
 ,p_stack=>'off'
 ,p_connect_nulls=>'Y'
-,p_zoom_and_scroll=>'off'
+,p_zoom_and_scroll=>'{zs}'
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
@@ -406,11 +527,12 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_horizontal_grid=>'auto'
 ,p_vertical_grid=>'auto'
 );"""))
+        bar_clr = f",p_color=>'{palette[0]}'" if palette else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({bar_ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>10,p_name=>'{_esc(bar_name)}'
+,p_seq=>10,p_name=>'{_esc(_bar_name)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(sql_query)}
 ,p_items_value_column_name=>'{vc}'
@@ -419,12 +541,13 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'off'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
+{bar_clr});"""))
+        line_clr = f",p_color=>'{palette[1]}'" if palette and len(palette) > 1 else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({line_ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>20,p_name=>'{_esc(line_name)}'
+,p_seq=>20,p_name=>'{_esc(_line_name)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(cum_sql)}
 ,p_items_value_column_name=>'VALUE'
@@ -436,10 +559,13 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'on'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
-        _jet_axis(chart_id, "y",  ids.next(f"pareto_y_{region_id}"),  bar_name)
-        _jet_axis(chart_id, "y2", ids.next(f"pareto_y2_{region_id}"), "% Acumulado")
-        _jet_axis(chart_id, "x",  ids.next(f"pareto_x_{region_id}"))
+{line_clr});"""))
+        _jet_axis(chart_id, "y",  ids.next(f"pareto_y_{region_id}"),
+                  _bar_name, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "y2", ids.next(f"pareto_y2_{region_id}"),
+                  _y2_title, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "x",  ids.next(f"pareto_x_{region_id}"),
+                  zoom_enabled=zoom_enabled)
         session.regions[region_id] = RegionInfo(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart",
@@ -464,11 +590,16 @@ def apex_add_scatter_plot(
     x_column: str = "X",
     y_column: str = "Y",
     label_column: str = "LABEL",
-    series_name: str = "Correlação",
+    series_name: str = "Correlation",
     height: int = 380,
     x_axis_title: str = "",
     y_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a scatter plot to visualize correlation between two numeric variables.
 
@@ -493,10 +624,17 @@ def apex_add_scatter_plot(
         x_axis_title: X-axis label.
         y_axis_title: Y-axis label.
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported key:
+            ``"series"`` (series legend label).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
     """
+    _series = labels.get("series", series_name) if labels else series_name
     from .visual_tools import apex_add_jet_chart
     return apex_add_jet_chart(
         page_id=page_id,
@@ -505,7 +643,7 @@ def apex_add_scatter_plot(
         sql_query=sql_query,
         label_column=x_column,
         value_column=y_column,
-        series_name=series_name,
+        series_name=_series,
         height=height,
         x_axis_title=x_axis_title,
         y_axis_title=y_axis_title,
@@ -522,10 +660,15 @@ def apex_add_range_chart(
     label_column: str = "LABEL",
     low_column: str = "LOW",
     high_column: str = "HIGH",
-    series_name: str = "Variação",
+    series_name: str = "Range",
     height: int = 380,
     y_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a range (high-low) chart — shows min/max bands over categories.
 
@@ -547,6 +690,12 @@ def apex_add_range_chart(
         height: Chart height in pixels.
         y_axis_title: Y-axis label.
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported key:
+            ``"series"`` (series legend label).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
@@ -555,9 +704,13 @@ def apex_add_range_chart(
     if err:
         return err
 
+    _series = labels.get("series", series_name) if labels else series_name
     region_id = ids.next(f"range_{page_id}_{_esc(region_name)}")
     chart_id  = ids.next(f"rangechart_{page_id}_{region_id}")
     ser_id    = ids.next(f"rangeser_{page_id}_{region_id}")
+    anim = _animation_value(animation)
+    zs = _zoom_scroll_value(zoom_enabled, scroll_enabled)
+    palette = resolve_palette(color_palette, 1) if color_palette else None
 
     try:
         _jet_region(region_id, region_name, sequence)
@@ -567,13 +720,13 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_chart_type=>'range'
 ,p_height=>'{height}'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
+,p_animation_on_display=>'{anim}'
+,p_animation_on_data_change=>'{anim}'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
 ,p_stack=>'off'
 ,p_connect_nulls=>'Y'
-,p_zoom_and_scroll=>'off'
+,p_zoom_and_scroll=>'{zs}'
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
@@ -583,11 +736,12 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_horizontal_grid=>'auto'
 ,p_vertical_grid=>'auto'
 );"""))
+        ser_clr = f",p_color=>'{palette[0]}'" if palette else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>10,p_name=>'{_esc(series_name)}'
+,p_seq=>10,p_name=>'{_esc(_series)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(sql_query)}
 ,p_items_value_column_name=>'{high_column.upper()}'
@@ -598,9 +752,11 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'off'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
-        _jet_axis(chart_id, "y", ids.next(f"rangey_{region_id}"), y_axis_title)
-        _jet_axis(chart_id, "x", ids.next(f"rangex_{region_id}"))
+{ser_clr});"""))
+        _jet_axis(chart_id, "y", ids.next(f"rangey_{region_id}"),
+                  y_axis_title, zoom_enabled=zoom_enabled)
+        _jet_axis(chart_id, "x", ids.next(f"rangex_{region_id}"),
+                  zoom_enabled=zoom_enabled)
         session.regions[region_id] = RegionInfo(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart",
@@ -627,6 +783,11 @@ def apex_add_area_chart(
     y_axis_title: str = "",
     x_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a multi-series area chart.
 
@@ -636,7 +797,7 @@ def apex_add_area_chart(
     Args:
         page_id: Target page ID.
         region_name: Region display name.
-        series_list: List of 2–6 series dicts:
+        series_list: List of 1–10 series dicts:
             - "name": Series legend label
             - "sql": SQL returning LABEL and VALUE columns
         height: Chart height in pixels.
@@ -644,6 +805,11 @@ def apex_add_area_chart(
         y_axis_title: Y-axis label.
         x_axis_title: X-axis label.
         sequence: Display order on page.
+        labels: Optional dict of localised labels (passed through to stacked).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
@@ -654,6 +820,9 @@ def apex_add_area_chart(
             series_list=series_list, chart_type="area",
             height=height, y_axis_title=y_axis_title,
             x_axis_title=x_axis_title, sequence=sequence,
+            labels=labels, zoom_enabled=zoom_enabled,
+            scroll_enabled=scroll_enabled, animation=animation,
+            color_palette=color_palette,
         )
     # Non-stacked: use apex_add_jet_chart with extra_series
     from .visual_tools import apex_add_jet_chart
@@ -686,8 +855,12 @@ def apex_add_animated_counter(
     icon: str = "fa-tachometer",
     suffix: str = "",
     prefix: str = "",
-    duration_ms: int = 1500,
+    duration_ms: int = 2000,
     sequence: int = 10,
+    icon_size: str = "2rem",
+    number_size: str = "2.8rem",
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a count-up animated number display — value animates from 0 to target.
 
@@ -704,8 +877,13 @@ def apex_add_animated_counter(
         icon: Font Awesome class above the number (e.g., "fa-users", "fa-star").
         suffix: Text appended to the number (e.g., "%", " pts").
         prefix: Text prepended (e.g., "R$ ").
-        duration_ms: Animation duration in milliseconds (default 1500).
+        duration_ms: Animation duration in milliseconds (default 2000).
         sequence: Display order on page.
+        icon_size: CSS font-size for the icon (default "2rem").
+        number_size: CSS font-size for the counter number (default "2.8rem").
+        animation: Animation style — "auto" or "none".  When "none" the
+            counter renders the final value immediately without count-up.
+        color_palette: Ignored for counters (accepts for API consistency).
 
     Returns:
         JSON with status, region_id.
@@ -714,10 +892,7 @@ def apex_add_animated_counter(
     if err:
         return err
 
-    _COLORS = {"blue": "#1e88e5", "green": "#43a047", "orange": "#fb8c00",
-               "red": "#e53935", "purple": "#8e24aa", "teal": "#00897b",
-               "unimed": "#00995d", "indigo": "#3949ab", "amber": "#ffb300"}
-    clr = _COLORS.get(color.lower(), color)
+    clr = resolve_color(color)
     region_id = ids.next(f"counter_{page_id}_{_esc(region_name)}")
     uid = region_id % 999999
 
@@ -727,8 +902,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_val := 0; END;
   sys.htp.p('<style>
     .mcp-cnt-{uid}{{text-align:center;padding:24px;}}
-    .mcp-cnt-ico-{uid}{{font-size:2rem;color:{clr};margin-bottom:10px;}}
-    .mcp-cnt-num-{uid}{{font-size:2.8rem;font-weight:800;color:{clr};line-height:1;}}
+    .mcp-cnt-ico-{uid}{{font-size:{icon_size};color:{clr};margin-bottom:10px;}}
+    .mcp-cnt-num-{uid}{{font-size:{number_size};font-weight:800;color:{clr};line-height:1;}}
     .mcp-cnt-lbl-{uid}{{font-size:.82rem;color:#888;margin-top:8px;text-transform:uppercase;letter-spacing:.5px;}}
   </style>');
   sys.htp.p('<div class="mcp-cnt-{uid}">');
@@ -777,10 +952,15 @@ def apex_add_gradient_donut(
     value_column: str = "VALUE",
     center_label_sql: str = "",
     center_label_text: str = "",
-    series_name: str = "Distribuição",
+    series_name: str = "Distribution",
     height: int = 380,
     legend_position: str = "end",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a donut chart — optionally with a dynamic value in the center.
 
@@ -803,10 +983,17 @@ def apex_add_gradient_donut(
         height: Chart height in pixels.
         legend_position: "end" | "start" | "top" | "bottom" | "none".
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported key:
+            ``"series"`` (series legend label).
+        zoom_enabled: Ignored for donut charts (accepts for API consistency).
+        scroll_enabled: Ignored for donut charts (accepts for API consistency).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
     """
+    _series = labels.get("series", series_name) if labels else series_name
     from .visual_tools import apex_add_jet_chart
     result = apex_add_jet_chart(
         page_id=page_id,
@@ -815,7 +1002,7 @@ def apex_add_gradient_donut(
         sql_query=sql_query,
         label_column=label_column,
         value_column=value_column,
-        series_name=series_name,
+        series_name=_series,
         height=height,
         legend_position=legend_position,
         sequence=sequence,
@@ -829,15 +1016,17 @@ def apex_add_mini_charts_row(
     page_id: int,
     charts: list[dict],
     sequence: int = 20,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
-    """Add a row of 2–4 compact mini charts side by side.
+    """Add a row of 1–6 compact mini charts side by side.
 
     Each mini chart is a small JET chart rendered inside a flex container.
     Useful for dashboard rows comparing related metrics.
 
     Args:
         page_id: Target page ID.
-        charts: List of 2–4 chart dicts, each with:
+        charts: List of 1–6 chart dicts, each with:
             - "region_name": Chart title
             - "chart_type": "bar" | "line" | "pie" | "donut" | "area"
             - "sql": SQL returning LABEL and VALUE
@@ -846,6 +1035,8 @@ def apex_add_mini_charts_row(
             - "series_name": (optional)
             - "height": (optional, default 220)
         sequence: Base display order (each chart gets sequence+i).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, regions_created, page_id.
@@ -853,9 +1044,9 @@ def apex_add_mini_charts_row(
     err = _guard(page_id)
     if err:
         return err
-    if not charts or len(charts) > 4:
+    if not charts or len(charts) > 6:
         return _json({"status": "error",
-                      "error": "charts must have 2–4 items."})
+                      "error": "charts must have 1–6 items."})
 
     from .visual_tools import apex_add_jet_chart
     created: list[int] = []
@@ -891,11 +1082,16 @@ def apex_add_bubble_chart(
     y_column: str = "Y",
     z_column: str = "Z",
     label_column: str = "LABEL",
-    series_name: str = "Bolhas",
+    series_name: str = "Bubbles",
     height: int = 420,
     x_axis_title: str = "",
     y_axis_title: str = "",
     sequence: int = 20,
+    labels: dict[str, str] | None = None,
+    zoom_enabled: bool = False,
+    scroll_enabled: bool = False,
+    animation: str = "auto",
+    color_palette: list[str] | str | None = None,
 ) -> str:
     """Add a bubble chart with X, Y position and Z size dimensions.
 
@@ -922,6 +1118,12 @@ def apex_add_bubble_chart(
         x_axis_title: X-axis label.
         y_axis_title: Y-axis label.
         sequence: Display order on page.
+        labels: Optional dict to override labels.  Supported key:
+            ``"series"`` (series legend label).
+        zoom_enabled: Enable zoom on chart axes (default False).
+        scroll_enabled: Enable scroll on chart (default False).
+        animation: Animation style — "auto", "none", "fade", or "zoom".
+        color_palette: List of hex colours, a named palette string, or None.
 
     Returns:
         JSON with status, region_id.
@@ -930,9 +1132,13 @@ def apex_add_bubble_chart(
     if err:
         return err
 
+    _series = labels.get("series", series_name) if labels else series_name
     region_id = ids.next(f"bubble_{page_id}_{_esc(region_name)}")
     chart_id  = ids.next(f"bubblechart_{page_id}_{region_id}")
     ser_id    = ids.next(f"bubbleser_{page_id}_{region_id}")
+    anim = _animation_value(animation)
+    zs = _zoom_scroll_value(zoom_enabled, scroll_enabled)
+    palette = resolve_palette(color_palette, 1) if color_palette else None
 
     try:
         _jet_region(region_id, region_name, sequence)
@@ -942,13 +1148,13 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_region_id=>wwv_flow_imp.id({region_id})
 ,p_chart_type=>'bubble'
 ,p_height=>'{height}'
-,p_animation_on_display=>'auto'
-,p_animation_on_data_change=>'auto'
+,p_animation_on_display=>'{anim}'
+,p_animation_on_data_change=>'{anim}'
 ,p_orientation=>'vertical'
 ,p_data_cursor=>'auto'
 ,p_stack=>'off'
 ,p_connect_nulls=>'Y'
-,p_zoom_and_scroll=>'off'
+,p_zoom_and_scroll=>'{zs}'
 ,p_tooltip_rendered=>'Y'
 ,p_show_series_name=>true
 ,p_show_value=>true
@@ -958,11 +1164,12 @@ wwv_flow_imp_page.create_jet_chart(
 ,p_horizontal_grid=>'auto'
 ,p_vertical_grid=>'auto'
 );"""))
+        ser_clr = f",p_color=>'{palette[0]}'" if palette else ""
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_series(
  p_id=>wwv_flow_imp.id({ser_id})
 ,p_chart_id=>wwv_flow_imp.id({chart_id})
-,p_seq=>10,p_name=>'{_esc(series_name)}'
+,p_seq=>10,p_name=>'{_esc(_series)}'
 ,p_data_source_type=>'SQL'
 ,p_data_source=>{_sql_to_varchar2(sql_query)}
 ,p_items_value_column_name=>'{y_column.upper()}'
@@ -975,9 +1182,10 @@ wwv_flow_imp_page.create_jet_chart_series(
 ,p_assigned_to_y2=>'off'
 ,p_items_label_rendered=>false
 ,p_threshold_display=>'onIndicator'
-);"""))
+{ser_clr});"""))
         xt = f",p_title=>'{_esc(x_axis_title)}'" if x_axis_title else ""
         yt = f",p_title=>'{_esc(y_axis_title)}'" if y_axis_title else ""
+        _zb = _zoom_bools(zoom_enabled)
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_axis(
  p_id=>wwv_flow_imp.id({ids.next(f'buby_{region_id}')})
@@ -986,7 +1194,7 @@ wwv_flow_imp_page.create_jet_chart_axis(
 {yt},p_format_scaling=>'auto',p_scaling=>'linear'
 ,p_baseline_scaling=>'zero',p_major_tick_rendered=>'on'
 ,p_minor_tick_rendered=>'off',p_tick_label_rendered=>'on'
-{_ZOOM_BOOLS});"""))
+{_zb});"""))
         db.plsql(_blk(f"""
 wwv_flow_imp_page.create_jet_chart_axis(
  p_id=>wwv_flow_imp.id({ids.next(f'bubx_{region_id}')})
@@ -996,7 +1204,7 @@ wwv_flow_imp_page.create_jet_chart_axis(
 ,p_baseline_scaling=>'zero',p_major_tick_rendered=>'on'
 ,p_minor_tick_rendered=>'off',p_tick_label_rendered=>'on'
 ,p_tick_label_rotation=>'none',p_tick_label_position=>'outside'
-{_ZOOM_BOOLS});"""))
+{_zb});"""))
         session.regions[region_id] = RegionInfo(
             region_id=region_id, page_id=page_id,
             region_name=region_name, region_type="chart",

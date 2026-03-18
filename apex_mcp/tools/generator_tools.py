@@ -25,11 +25,19 @@ _log = logging.getLogger("apex_mcp.generators")
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Audit columns to skip when building form items
-_AUDIT_COLUMNS = {
-    "DT_CRIACAO", "DT_ATUALIZACAO", "DS_CRIADO_POR", "DS_ATUALIZADO_POR",
-    "CREATED_ON", "UPDATED_ON", "CREATED_BY", "UPDATED_BY",
-}
+# Audit columns to skip when building form items.
+# Prefer the i18n module (locale-aware), fall back to a broad default set that
+# covers English and Portuguese naming conventions.
+try:
+    from ..i18n import audit_columns as _get_audit_cols
+    _AUDIT_COLUMNS: set[str] = _get_audit_cols()
+except ImportError:
+    _AUDIT_COLUMNS: set[str] = {
+        "CREATED_ON", "UPDATED_ON", "CREATED_BY", "UPDATED_BY",
+        "CREATED_AT", "UPDATED_AT", "DT_CRIACAO", "DT_ATUALIZACAO",
+        "DS_CRIADO_POR", "DS_ATUALIZADO_POR", "CREATED_DATE", "MODIFIED_DATE",
+        "CREATION_DATE", "LAST_UPDATE_DATE", "LAST_UPDATED_BY",
+    }
 
 
 def _humanize(name: str) -> str:
@@ -150,6 +158,10 @@ def apex_generate_crud(
     form_page_name: str = "",
     include_search: bool = True,
     auth_scheme: str = "",
+    audit_columns: list[str] | None = None,
+    editable: bool = True,
+    items_per_page: int = 15,
+    button_labels: dict[str, str] | None = None,
 ) -> str:
     """Generate a complete CRUD (Create/Read/Update/Delete) module for a database table.
 
@@ -173,6 +185,20 @@ def apex_generate_crud(
         form_page_name: Display name for form page. Defaults to "Edit {list_page_name}".
         include_search: Add search bar to the IR (default True).
         auth_scheme: Authorization scheme name for both pages.
+        audit_columns: Custom list of audit column names to exclude from forms.
+            If None, uses the default set (English + Portuguese names).
+            Example: ["CREATED_ON", "UPDATED_ON", "CREATED_BY", "UPDATED_BY"]
+        editable: Whether the form page allows editing (default True).
+            When False, form items are rendered as display-only and Save/Delete
+            buttons are omitted.
+        items_per_page: Number of rows per page in the IR (default 15).
+        button_labels: Custom labels for CRUD buttons. Supported keys:
+            - "new": Label for the New button on the list page (default "New")
+            - "save": Label for the Save button on the form (default "Save")
+            - "cancel": Label for the Cancel button on the form (default "Cancel")
+            - "delete": Label for the Delete button on the form (default "Delete")
+            - "confirm_delete": Confirmation message for delete (default
+              "Would you like to delete this record?")
 
     Returns:
         JSON with status, pages created, items created, LOVs created, and summary.
@@ -199,6 +225,20 @@ def apex_generate_crud(
     upper_table = table_name.upper()
     list_page_name = list_page_name or _humanize(upper_table)
     form_page_name = form_page_name or f"Edit {list_page_name}"
+
+    # Resolve effective audit columns — caller override or module default
+    effective_audit_cols: set[str] = (
+        {c.upper() for c in audit_columns} if audit_columns is not None
+        else _AUDIT_COLUMNS
+    )
+
+    # Resolve button labels — caller overrides or English defaults
+    _btn = button_labels or {}
+    _lbl_new = _btn.get("new", "New")
+    _lbl_save = _btn.get("save", "Save")
+    _lbl_cancel = _btn.get("cancel", "Cancel")
+    _lbl_delete = _btn.get("delete", "Delete")
+    _lbl_confirm_delete = _btn.get("confirm_delete", "Would you like to delete this record?")
 
     _log.info("Generating CRUD for table %s (pages %d, %d)", table_name, list_page_id, form_page_id)
 
@@ -422,6 +462,7 @@ wwv_flow_imp_page.create_worksheet_rpt(
 ,p_report_alias=>'DEFAULT'
 ,p_status=>'PUBLIC'
 ,p_is_default=>'Y'
+,p_rows_per_page=>{items_per_page}
 ,p_report_columns=>'{":".join(col_names)}'
 ,p_sort_column_1=>'{primary_key}'
 ,p_sort_direction_1=>'ASC'
@@ -443,7 +484,7 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'Y'
-,p_button_image_alt=>'New'
+,p_button_image_alt=>'{_esc(_lbl_new)}'
 ,p_button_position=>'RIGHT_OF_IR_SEARCH_BAR'
 ,p_button_redirect_url=>'{_esc(new_link)}'
 );"""))
@@ -494,7 +535,7 @@ wwv_flow_imp_page.create_page_plug(
         for col in cols:
             col_name = col["COLUMN_NAME"]
             # Skip audit columns
-            if col_name.upper() in _AUDIT_COLUMNS:
+            if col_name.upper() in effective_audit_cols:
                 continue
 
             # Determine item type — PK/FK take priority, then _col_to_item_type
@@ -514,9 +555,14 @@ wwv_flow_imp_page.create_page_plug(
                 log.append(col_descriptor.get("note", f"Column {col_name} skipped."))
                 continue
 
+            # When form is read-only, render all visible items as display-only
+            # (hidden PK items remain hidden for link-back support)
+            if not editable and item_type != ITEM_HIDDEN:
+                item_type = ITEM_DISPLAY
+
             item_name = f"P{form_page_id}_{col_name.upper()}"
             label = _humanize(col_name)
-            is_required = col["NULLABLE"] == "N" and col_name.upper() not in pk_columns
+            is_required = col["NULLABLE"] == "N" and col_name.upper() not in pk_columns and editable
             label_tmpl = LABEL_REQUIRED if is_required else LABEL_OPTIONAL
             item_id = ids.next(f"item_{form_page_id}_{col_name.lower()}")
 
@@ -581,26 +627,28 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'N'
-,p_button_image_alt=>'Cancel'
+,p_button_image_alt=>'{_esc(_lbl_cancel)}'
 ,p_button_position=>'CLOSE'
 ,p_button_redirect_url=>'{_esc(cancel_url)}'
 );"""))
         session.buttons[f"{form_page_id}:CANCEL"] = cancel_btn_id
 
-        # Delete button (conditional: only shown when ALL PK items are not null)
-        delete_btn_id = ids.next(f"btn_delete_{form_page_id}")
-        pk_item = f"P{form_page_id}_{primary_key}"
-        if pk_type == "composite":
-            # For composite PKs, use a PL/SQL expression that checks every PK item
-            pk_not_null_expr = " AND ".join(
-                f":P{form_page_id}_{pk} IS NOT NULL" for pk in pk_list
-            )
-            delete_condition_type = "PLSQL_EXPRESSION"
-            delete_condition_value = pk_not_null_expr
-        else:
-            delete_condition_type = "ITEM_IS_NOT_NULL"
-            delete_condition_value = pk_item
-        db.plsql(_blk(f"""
+        # Delete and Save buttons are only created when the form is editable
+        if editable:
+            # Delete button (conditional: only shown when ALL PK items are not null)
+            delete_btn_id = ids.next(f"btn_delete_{form_page_id}")
+            pk_item = f"P{form_page_id}_{primary_key}"
+            if pk_type == "composite":
+                # For composite PKs, use a PL/SQL expression that checks every PK item
+                pk_not_null_expr = " AND ".join(
+                    f":P{form_page_id}_{pk} IS NOT NULL" for pk in pk_list
+                )
+                delete_condition_type = "PLSQL_EXPRESSION"
+                delete_condition_value = pk_not_null_expr
+            else:
+                delete_condition_type = "ITEM_IS_NOT_NULL"
+                delete_condition_value = pk_item
+            db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({delete_btn_id})
 ,p_button_sequence=>20
@@ -610,17 +658,17 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'N'
-,p_button_image_alt=>'Delete'
+,p_button_image_alt=>'{_esc(_lbl_delete)}'
 ,p_button_position=>'DELETE'
 ,p_button_condition_type=>'{delete_condition_type}'
 ,p_button_condition=>'{_esc(delete_condition_value)}'
-,p_confirm_message=>'Would you like to delete this record?'
+,p_confirm_message=>'{_esc(_lbl_confirm_delete)}'
 );"""))
-        session.buttons[f"{form_page_id}:DELETE"] = delete_btn_id
+            session.buttons[f"{form_page_id}:DELETE"] = delete_btn_id
 
-        # Save button (hot, right side — CREATE position)
-        save_btn_id = ids.next(f"btn_save_{form_page_id}")
-        db.plsql(_blk(f"""
+            # Save button (hot, right side — CREATE position)
+            save_btn_id = ids.next(f"btn_save_{form_page_id}")
+            db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_button(
  p_id=>wwv_flow_imp.id({save_btn_id})
 ,p_button_sequence=>30
@@ -630,27 +678,30 @@ wwv_flow_imp_page.create_page_button(
 ,p_button_template_options=>'#DEFAULT#'
 ,p_button_template_id=>{BTN_TMPL_TEXT}
 ,p_button_is_hot=>'Y'
-,p_button_image_alt=>'Save'
+,p_button_image_alt=>'{_esc(_lbl_save)}'
 ,p_button_position=>'CREATE'
 );"""))
-        session.buttons[f"{form_page_id}:SAVE"] = save_btn_id
-        log.append("Form buttons created (Cancel, Delete, Save)")
+            session.buttons[f"{form_page_id}:SAVE"] = save_btn_id
+            log.append("Form buttons created (Cancel, Delete, Save)")
+        else:
+            log.append("Form buttons created (Cancel only — read-only mode)")
 
-        # ── 14. DML process on form page ──────────────────────────────────
-        proc_id = ids.next(f"proc_dml_{form_page_id}")
-        # Build column list for DML process (skip audit cols)
-        dml_cols = [
-            c["COLUMN_NAME"] for c in cols
-            if c["COLUMN_NAME"].upper() not in _AUDIT_COLUMNS
-        ]
-        col_items_csv = ",".join(
-            f"p_col{i:02d}=>'{c}',p_val{i:02d}=>:{item_prefix}"
-            for i, (c, item_prefix) in enumerate(
-                [(c, f"P{form_page_id}_{c}") for c in dml_cols], start=1
+        # ── 14. DML process on form page (only when editable) ─────────────
+        if editable:
+            proc_id = ids.next(f"proc_dml_{form_page_id}")
+            # Build column list for DML process (skip audit cols)
+            dml_cols = [
+                c["COLUMN_NAME"] for c in cols
+                if c["COLUMN_NAME"].upper() not in effective_audit_cols
+            ]
+            col_items_csv = ",".join(
+                f"p_col{i:02d}=>'{c}',p_val{i:02d}=>:{item_prefix}"
+                for i, (c, item_prefix) in enumerate(
+                    [(c, f"P{form_page_id}_{c}") for c in dml_cols], start=1
+                )
             )
-        )
 
-        db.plsql(_blk(f"""
+            db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({proc_id})
 ,p_process_sequence=>10
@@ -664,12 +715,11 @@ wwv_flow_imp_page.create_page_process(
 ,p_attribute_08=>'Y'
 ,p_error_display_location=>'INLINE_IN_NOTIFICATION'
 );"""))
-        log.append("DML process created")
+            log.append("DML process created")
 
-
-        # After delete/save: redirect to list page
-        redirect_proc_id = ids.next(f"proc_redirect_{form_page_id}")
-        db.plsql(_blk(f"""
+            # After delete/save: redirect to list page
+            redirect_proc_id = ids.next(f"proc_redirect_{form_page_id}")
+            db.plsql(_blk(f"""
 wwv_flow_imp_page.create_page_process(
  p_id=>wwv_flow_imp.id({redirect_proc_id})
 ,p_process_sequence=>30
@@ -682,7 +732,9 @@ wwv_flow_imp_page.create_page_process(
 ,p_process_when=>'SAVE,DELETE'
 ,p_process_when_type=>'REQUEST_IN_CONDITION'
 );"""))
-        log.append("Post-submit processes created (delete + redirect)")
+            log.append("Post-submit processes created (delete + redirect)")
+        else:
+            log.append("DML process skipped (read-only mode)")
 
         # ── 15. Breadcrumb / nav menu entry ───────────────────────────────
         nav_id = ids.next(f"nav_{list_page_id}")
