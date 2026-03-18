@@ -63,7 +63,7 @@ Every app build follows: `apex_connect()` -> `apex_create_app()` -> [add pages/r
 
 ### Tool Modules (`apex_mcp/tools/`)
 
-19 modules, each containing related MCP tool functions. All tools are plain async/sync functions registered in `server.py` via `mcp.tool()`. They share access to `db` and `session` singletons.
+17 modules (+ `__init__.py`), each containing related MCP tool functions. All tools are plain async/sync functions registered in `server.py` via `mcp.tool()`. They share access to `db` and `session` singletons.
 
 ### PL/SQL Generation Pattern
 
@@ -75,7 +75,7 @@ All tools that create APEX components follow the same pattern:
 
 ### Server Registration (`apex_mcp/server.py`)
 
-The FastMCP server imports all tool functions and registers them with `mcp.tool()`. The `instructions` string in the server definition serves as the system prompt sent to AI clients.
+The FastMCP server imports all tool functions and registers them with `mcp.tool()`. Each registration uses `description=` to provide a concise one-liner (~65 chars avg) that overrides the verbose Python docstring in the MCP tool listing sent to AI clients. This reduces LLM context cost from ~84K chars to ~10K chars (89% reduction). The `instructions` string serves as the system prompt sent to AI clients — kept compact (~1.7K chars) with lifecycle, quick-build pattern, generators reference, and conventions.
 
 ## MCP Configuration (`.mcp.json`)
 
@@ -222,11 +222,26 @@ Python: `>=3.11`
 Build: `hatchling`
 No linter/formatter configured.
 
+## Adding a New Tool
+
+1. Add the function to the appropriate `tools/*.py` module (or create a new module if no existing one fits)
+2. Register it in `server.py` with `mcp.tool()(function_name)` — include the appropriate annotation (`_READ`, `_WRITE`, etc.) and tag
+3. Add unit tests in `tests/`
+4. Ensure `pytest tests/ -m "not integration"` passes
+
+## Single-User Constraint
+
+When using HTTP transport (`--transport streamable-http` or `--transport sse`), the server is single-user: the `ImportSession` singleton means only one active import session exists at a time. For multi-user scenarios, run separate server instances on different ports.
+
+## Project Context
+
+This server was built for the **Plataforma Desfecho TEA** project (Unimed Nacional) — a clinical assessment platform for TEA (Autism Spectrum Disorder) using Oracle APEX 24.2 + Oracle ADB 23ai. The `TEA_*` tables referenced in demos are from this domain. `TEA_QUESTOES` / `TEA_OPCOES_RESPOSTA` tables are empty in the repo (content is licensed).
+
 ## Project Layout
 
 ```
 apex_mcp/
-  __init__.py          # Package init, version 0.3.0
+  __init__.py          # Package init, version 0.4.0
   __main__.py          # python -m apex_mcp entry
   server.py            # FastMCP server, tool registration, CLI arg parsing
   config.py            # Env var loading, APEX version constants
